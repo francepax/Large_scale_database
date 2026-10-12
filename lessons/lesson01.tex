@@ -1,0 +1,39 @@
+\section{Key-value Databases}
+
+In key-value database:
+\begin{itemize}
+    \item Data are persistently stored
+    \item There is no need for table, we do not need group of related attributes.
+    \item The unique requirement is that each value has an unique identifier (key).
+    \item Keys must be uniques within the namespace define inside each specific bucket.
+\end{itemize}
+
+Usually key-value database are used when the main goal si ease of storage and retrieval and not organizing complex data structure
+
+
+\subsection{simplicity}
+
+
+\subsection{speed}
+One essential feature of Key-value database is speed. This is beacuse most of the key-value database are loaded in memory and by using cache we can speed up read and write operation.
+
+\subsection{Scalability}
+\begin{definition}
+    the scalability (horizontal) is the capability to add or remove servers from a cluster of servers as needed to accommodate the load on the system
+\end{definition}
+
+\texttt{Master-slave architecture}: 
+\begin{itemize}
+    \item the master is the server that receive all the write operation.
+    \item the slaves only respond to read request and they do not communicate among them.
+\end{itemize}
+
+Pros: very simple architecture with no need to coordination in write operation
+Problems: If the master fails $\implies$ by by.
+
+We can complicate this architecture allowing the slave to communicate among them. The slaves ask to the other slaves if someone has received response from the master, if not they can choose someone to be promoted as a master. 
+
+\texttt{Masterless architecture}
+There is no master node that has the master copy of the data but each node is in charge of helping his neighbors. This architecture implies that the nodes are more all less the same , from a software and hardware point of view, they can all compute reade and write operation and are able to handle replication. Each time there is a write operation that update a key on one of the server it propagate to its two neighbors and to the server two nodes ahead(in case we want 4 replica, we can choose how many). After this process the updated key is store in 4 different nodes to avoid SPF.
+
+
