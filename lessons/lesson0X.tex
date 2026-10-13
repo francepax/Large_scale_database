@@ -1,0 +1,36 @@
+\section{Lesson bho? --- 13/10/2026}
+
+\subsection{Document Database Introduction}
+In document database the single piece of information is a structured document, usually the format chosen is \g{xml} or \g{json}. Structured documents provide \g{high flexibility} and the possibility to handle complex data structure. Other important features are that Document database are \g{schema-less} and that they allow complex operations (queries and filtering) and \g{ACID transactions}.
+
+\subsubsection{XML documentes}
+XML stand for \g{eXtensibke Markup Language}, a markup language specifies the structure and the content of a document and includes \g{tags} to provide extra information. With XML we can store any form of information and is typically used in website to separate data and format or as a standard for some document type(docx, pptx). Some advantages of XML are:
+\begin{itemize}
+    \item XML is text based (easily transmitted).
+    \item One XML document can be displayed differently in different media.
+    \item XML documente can be modularized.
+\end{itemize}
+
+Some problems and drawbacks of XML are:
+\begin{itemize}
+    \item tags are verbose and repetitious (we need more storage space)
+    \item XML documents are wasteful of space and computationally expensive.
+    \item JSON is better
+\end{itemize}
+
+\subsubsection{JSON Documents}
+JSON stand for \g{JavaScript Object Notation} and it's used to format data, a json document has been preferred to an XML one for \g{data intercharging} on the internet. In JSON an object is an unordered set of \g{name/value} pairs, the paires are enclosed within braces(\{\}), the name and the value are separeted by a colon(:) and pairs are separeted by commas. The values can be many object: another json object, string, array(enclosed in brackets[]), number, boolean adn Null.
+
+We will study json based database where the data is stored in JSON format of course, document may bee stored in collection and there is not a predefined scheme.
+
+\subsubsection{Schema-less vs Schema}
+A schema is a specification that describes teh structure of an object, such as table. This specifications need to be define before executing any code and we can't change the structure of the objects after. In document database we do not need to define any structure and developers can create collections by simply inserting them into the database. In schema-less database we have high flexibility in handling the structure of object but the DBMS may be not allowed to enforce rules based on the structure of the data, is more difficult to perform integrity check.
+
+\subsection{Data modelling and partitioning}
+We will see how to model document database given some requirements. 
+
+\subsubsection{Document Embedding}
+Using document database we could simulate a relational database using collection but DON'T DO IT, instead we will use nested documents to represent relationships among entities. Usually we want to reduce the number of collection used. Using nested documents (\g{Document Embedding}) we can retrieve both entities in a single operation, we need to be careful because we can introduce duplicate across multiple documents and in complex design this could lead to issues or inconsistencies in case of changes. We need to be care on the embedding we do and choose carefully depending on the implementation.
+
+\subsubsection{Document Linking}
+For the too many relations we can also used another approach, Document linking. In this approach we can define a collection of entities and inside a list of ID refearing to another entities collection. DO NOT USE IN THE PROJECT except for some specific cases.
