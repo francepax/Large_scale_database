@@ -36,9 +36,9 @@ _minted*/
 *.pyg
 
 # --- PDF ---
-# Esclusi sia i PDF compilati (main.pdf) sia il materiale didattico in docs/.
+# Escluso il materiale didattico in docs/.
 # Per tracciare un PDF specifico (es. una figura): !percorso/figura.pdf
-*.pdf
+docs/
 
 # --- Editor e sistema operativo ---
 .vscode/

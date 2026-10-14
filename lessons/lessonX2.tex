@@ -1,0 +1,17 @@
+\section{lesson x --- 14/10/2026}
+
+\subsection{One to many reletionship}
+We will consider as example the customer entity which may gave assosueted a list of address entities. Cusstomer have an ID, a name and string "$person\_or\_business$". In a one to many relationship the primary documente is teh \g{one} (customer) and the \g{many} entities (address) are represented as an array of embedded dovuments. We have some drawback using this approach: we could have consistency problem if there are the same address for diffrent customers; if a customer have a lot of address the dimension increase too much,(dimension could lead to inefficienty problem) we need to choose a max dimension; we could have problem with mutable document or dinamically dimension. For mutable document is better the linking documente approach if we have limits in document domension and we don't need to access the "too many" very often. 
+
+\subsection{Many to many reletionship}
+As example we can consider two entities: students and courses. We can use two collection and in both add an array of the IDs of the other one (we need to be careful on integrity, no one checks exept us). 
+
+esempio delle slide ( anche non completo ma va bene una istanza per entità)
+
+Another solution is to implement a partial document embedding: partial becauso we do not include all the values of the document but just the ones we want. For exemple in the student collection we can embed the partial documente of the course with just ID and title of the course.
+
+metti un esempio della collection student e uno dei course
+
+The third approach is to mix embedding and linking
+
+metti un esempio della collection student e uno dei corsi
