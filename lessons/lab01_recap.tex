@@ -1,0 +1,79 @@
+\section{Recap: Software Engineering}\label{sec:se}
+
+Before writing code we must understand and formalize what the customer needs. The same steps structure the design part of the project documentation.
+
+\subsection{Requirements}
+\begin{itemize}
+  \item \g{Functional requirements}: \s{what} the system does (inputs and outputs, interactions, business rules). For example: the system must send a confirmation email after an order.
+  \item \g{Non-functional requirements}: \s{how well} it does it (performance, scalability, reliability, security, usability, maintainability). They are classified as \g{product} (speed, capacity), \g{organisational} (process standards) and \g{external} (legislation, interoperability).
+\end{itemize}
+A good requirement must be \s{testable}: ``the application should be fast'' cannot be verified, ``the department list must be returned within 500\,ms for up to 1{,}000 departments'' can.
+
+\subsection{Use cases}
+A \g{use case} is a scenario-based description of how actors interact with the system, focusing on \s{what} it does and not on how it is implemented. An \g{actor} is a user or outside system that obtains value from the system: a human, a device, an external service or a timed event (a midnight job). Actors are outside the system boundary, so the application database is not an actor.
+\begin{itemize}
+  \item \g{<<include>>}: the base use case is incomplete without the included one, whose behaviour always happens (\s{Place Order} includes \s{Process Payment}).
+  \item \g{<<extend>>}: the base use case is complete by itself, and the extension is optional or conditional (\s{Apply Coupon} extends \s{Checkout}).
+\end{itemize}
+
+\subsection{Data modelling}
+From the requirements, not from the tables, we identify \g{entities}, \g{relationships} with their cardinality (one-to-one, one-to-many, many-to-many) and \g{attributes}. Entities and relationships are conceptual and do not depend on the chosen DBMS. The result is an ER diagram or, as mandatory in this course, a \g{UML analysis class diagram}, which also shows generalizations and explicit cardinalities. A \g{mock-up} shows how the system will look and is a basis for discussion with the customer.
+
+\section{Recap: Java}
+Java is object-oriented and platform independent: \texttt{javac} compiles the source into \g{bytecode}, one \texttt{.class} per class, which the \g{JVM} loads and executes.
+
+\begin{itemize}
+  \item A program is a set of \g{classes} organized in \g{packages}. A class groups data fields and methods, the file name must match the class name, and one class has the \texttt{main} method.
+  \item \g{Primitive types} (\texttt{byte}, \texttt{short}, \texttt{int}, \texttt{long}, \texttt{float}, \texttt{double}, \texttt{char}, \texttt{boolean}) store the value, \g{reference variables} store the address of an object. Two references can point to the same object.
+  \item \texttt{new} creates an instance and runs a \g{constructor}. \texttt{static} methods belong to the class, the others are instance methods.
+  \item Arguments are always passed \g{by value}. For an object the value is the reference: reassigning it does not affect the caller, but operations on the object are visible to the caller.
+  \item \g{Polymorphism}: at compile time with overloading, at run time with overriding.
+\end{itemize}
+
+\section{Recap: JDBC and Maven}\label{sec:jdbc}
+
+\subsection{JDBC}
+Applications and DBMSs differ in data types and access mode: SQL works on sets of tuples, the application on one tuple at a time (\g{impedance mismatch}). \g{JDBC} (Java DataBase Connectivity) is a unified Java API (\texttt{java.sql.*}) that hides the specific DBMS. The workflow is:
+\begin{enumerate}
+  \item the driver is loaded automatically if it is on the classpath;
+  \item \g{DriverManager} opens a \g{Connection} from a JDBC URL;
+  \item we create a \g{Statement} or \g{PreparedStatement};
+  \item we run \texttt{executeQuery} or \texttt{executeUpdate} (which returns the number of affected rows);
+  \item we iterate on the \g{ResultSet};
+  \item we close everything, ideally with try-with-resources.
+\end{enumerate}
+
+\begin{lstlisting}[language=Java]
+String url = "jdbc:mysql://localhost:3306/unipi";
+String sql = "SELECT name FROM students WHERE id = ?";
+try (Connection conn = DriverManager.getConnection(url, user, password);
+     PreparedStatement ps = conn.prepareStatement(sql)) {
+    ps.setInt(1, 42);
+    try (ResultSet rs = ps.executeQuery()) {
+        while (rs.next()) System.out.println(rs.getString("name"));
+    }
+}
+\end{lstlisting}
+
+A \g{PreparedStatement} is precompiled, so it is faster when reused, and its parameters are treated as data, which prevents \g{SQL injection}. With string concatenation an input like \texttt{Robert'); DROP TABLE students;--} would be executed as code. A plain \texttt{Statement} is acceptable only for static queries without parameters.
+
+\subsection{Maven}
+\g{Maven} manages build and dependencies from a central file, the \g{POM} (\texttt{pom.xml}). A project or library is identified by its coordinates \g{groupId}, \g{artifactId} and \g{version}. To add a library we add a dependency, downloaded from the central repository.
+\begin{lstlisting}
+<project ...>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>it.unipi.lsmsd</groupId>
+  <artifactId>exercises</artifactId>
+  <version>1.0-SNAPSHOT</version>
+  <properties>
+    <maven.compiler.release>25</maven.compiler.release>
+  </properties>
+  <dependencies>
+    <dependency>
+      <groupId>com.mysql</groupId>
+      <artifactId>mysql-connector-j</artifactId>
+      <version>9.4.0</version>
+    </dependency>
+  </dependencies>
+</project>
+\end{lstlisting}

@@ -1,0 +1,163 @@
+\section{Key-value Databases}\label{sec:kv}
+
+The key-value model is the simplest NoSQL model: it gives up query power to obtain speed and scalability.
+
+In key-value database:
+\begin{itemize}
+    \item Data are persistently stored.
+    \item There is no need for tables, we do not need groups of related attributes.
+    \item The unique requirement is that each value has a unique identifier (\g{key}).
+    \item Keys must be unique within the \g{namespace} (or \g{bucket}). Values can be duplicated.
+\end{itemize}
+
+Usually key-value databases are used when the main goal is ease of storage and retrieval and not organizing complex data structures. The model generalizes arrays: an \s{associative array} replaces the integer index with a generic identifier and allows values of any type.
+
+\subsection{Essential features}
+
+\subsubsection{Simplicity}
+We do not define a schema or data types. KV databases are \s{flexible} and \s{forgiving}: a new attribute only requires a change in the code, and different records can use different types for the same attribute. If we change how an entity is stored, the application must handle both representations or convert the old instances.
+
+\subsubsection{Speed}
+One essential feature of key-value databases is speed. This is because most of the key-value databases are loaded in memory and by using cache we can speed up read and write operations: the updated value is written in RAM and saved to disk while the program does something else.
+
+When the data exceeds the allocated RAM, some records must be evicted, typically with the \g{Least Recently Used} (LRU) policy. Since KV databases are memory-intensive and disk is much slower than RAM, they often use \g{compression}, looking for a trade-off between compression ratio and speed.
+
+\subsubsection{Scalability}
+\begin{definition}
+The scalability (horizontal) is the capability to add or remove servers from a cluster of servers as needed to accommodate the load on the system.
+\end{definition}
+
+\g{Master-slave architecture}:
+\begin{itemize}
+    \item the master is the server that receives all the write operations and propagates them;
+    \item the slaves only respond to read requests and they do not communicate among them.
+\end{itemize}
+Pros: very simple architecture with no need of coordination in write operations. Problems: if the master fails, no write is possible, and with many writes it becomes a bottleneck.
+
+We can complicate this architecture allowing the slaves to communicate among them. The slaves ask the other slaves if someone has received a response from the master; if not, they can choose someone to be promoted as master. This solves the availability problem, but not the write bottleneck.
+
+\g{Masterless architecture}: there is no master node that has the master copy of the data, but each node is in charge of helping its neighbors. The nodes are more or less the same from a software and hardware point of view, they can all compute read and write operations and are able to handle replication. Each time there is a write operation that updates a key on one of the servers, it is propagated to its neighbors, according to the number of replicas we choose. This avoids the single point of failure and is suited to applications with many writes and write peaks.
+
+\subsection{Designing keys}
+In a relational table the primary key can be a meaningless number. In a KV database there are no tables or columns, so the key is the only thing describing the value and should be \s{meaningful}. The standard pattern is:
+\begin{center}
+\texttt{EntityName:EntityId:EntityAttribute}
+\end{center}
+\begin{lstlisting}
+cust:1234123:firstName = "Pietro"
+cust:1234123:lastName  = "Ducange"
+\end{lstlisting}
+
+Naming rules:
+\begin{itemize}
+  \item use meaningful and unambiguous components (\texttt{cust}, \texttt{inv});
+  \item use \g{range-based components} (dates, counters) when we want to retrieve ranges;
+  \item use a common delimiter, typically \texttt{:};
+  \item keep keys short: long keys waste memory, but too short keys are likely to conflict.
+\end{itemize}
+
+\begin{example}[Range of values]
+To retrieve all customers who bought on a date, we use a key containing the date and a counter:
+\begin{lstlisting}
+purch:061514:1:custId
+purch:061514:2:custId
+
+define getCustPurchByDate(p_date)
+  v_custList = makeEmptyList();
+  v_rangeCnt = 1;
+  v_key = "purch:" + p_date + ":" + v_rangeCnt + ":custId";
+  while exists(v_key)
+    v_custList.append(AppNameSpace[v_key]);
+    v_rangeCnt = v_rangeCnt + 1;
+    v_key = "purch:" + p_date + ":" + v_rangeCnt + ":custId";
+  return v_custList;
+\end{lstlisting}
+\end{example}
+
+\paragraph{Simple or complex values?} Reading six attributes with six keys costs six accesses. If some attributes are commonly used together we can store them in one value, read with a single access:
+\begin{lstlisting}
+cust:1:nameAddr = { 'Jane Anderson', '39 NE River St. Portland, OR 97222' }
+\end{lstlisting}
+But if the value grows, it spans several memory blocks and reads and writes become slower. If we need complex structures, it is better to move to a document database.
+
+\paragraph{From relational to key-value.} Keys embed entity name, identifier and attribute. A one-to-many relation is represented by putting the identifier of the \s{one} side in the key of the \s{many} side:
+\begin{lstlisting}
+employee:$employee_id:$attribute = $value
+employee:1:first_name = "Pietro"
+
+payment:$payment_id:$employee_id:$attribute = $value
+payment:1:1:amount = "1000"
+payment:2:1:amount = "1200"
+payment:3:2:amount = "1500"
+\end{lstlisting}
+
+\begin{remark}
+If the project uses a KV database it must have at least two entities and one one-to-many or many-to-many relationship. This is the pattern to use.
+\end{remark}
+
+\subsection{From keys to servers}
+To locate a value we apply a \g{hash function} to the key. It returns a fixed-length value, and similar keys produce very different hashes, so keys are evenly distributed. With $N$ servers:
+\[
+\text{server} = \mathrm{hash}(key) \bmod N.
+\]
+All requests for the same key go to the same server, so for example two people cannot buy the same seat on two different servers. This scheme has two problems: adding a node changes $N$ and forces us to move most keys, and related keys (same customer) end up on different servers.
+
+\paragraph{Collisions.} Different keys can have the same hash, so the original key is stored as well.
+\begin{itemize}
+  \item \g{Open hashing}: each slot of the table holds a list of key-value entries.
+  \item \g{Linear probing}: if a slot is occupied we scan forward (with wrap-around) to the first free one. A lookup scans until it finds the key or an empty slot. On deletion the following entries must be shifted back, otherwise an empty slot would stop later searches too early.
+\end{itemize}
+
+\paragraph{Consistent hashing.} It avoids the massive rehashing. The same hash function is applied to both keys and server identifiers, which are placed on a \g{ring} (for example $2^{32}$ positions). The node responsible for a key is the first one found \s{clockwise} from the key's position.
+
+\begin{center}
+\begin{tikzpicture}[font=\small]
+  \draw[thick] (0,0) circle (1.6);
+  \foreach \a/\n in {90/A,330/B,210/C} {
+    \fill[blue!60!black] (\a:1.6) circle (3pt);
+    \node at (\a:2.05) {\n};
+  }
+  \foreach \a/\k in {40/k1,270/k2,150/k3} {
+    \fill[orange] (\a:1.6) circle (2pt);
+    \node at (\a:1.15) {\k};
+  }
+  \draw[-{Latex}, gray] (40:1.85) arc (40:-20:1.85);
+  \node[right, align=left] at (3,0) {k1 $\to$ B, k2 $\to$ C, k3 $\to$ A\\Add a node: only the keys of one\\arc move. Remove a node: its keys\\go to the next node clockwise.};
+\end{tikzpicture}
+\end{center}
+
+\subsection{Partitioning and replication}
+\g{Partitioning} (\g{sharding}) stores a subset of the pairs on each node, to balance data and load. It uses a \g{partition key} (the key or a part of it) and a \g{partition algorithm} (hash, range, geographic). Clusters are usually \s{loosely coupled}: each server manages its partitions and sends heartbeats, and if one fails the others take over its work. On a ring each write is also sent to the linked servers, which can answer for a failed node and realign it when it is back.
+
+\g{Replication} gives high availability. More replicas mean less risk of losing data but worse performance. Few replicas are acceptable if data can be easily regenerated. The behaviour is tuned through three parameters: \g{N} (number of replicas), \g{W} (copies written before the write completes) and \g{R} (copies read for a read).
+
+\begin{center}\small
+\begin{tabular}{lll}
+\toprule
+\textbf{Setup} & \textbf{Write} & \textbf{Read} \\
+\midrule
+$N{=}3, W{=}3, R{=}1$ & waits for all the copies, slow & one copy, up to date \\
+$N{=}3, W{=}2, R{=}2$ & waits for 2 copies & 2 copies, includes the latest \\
+$N{=}3, W{=}1, R{=}3$ & fast, may lose data if the node fails & all the copies, includes the latest \\
+$N{=}3, W{=}1, R{=}1$ & fast, may lose data if the node fails & fast, may be stale \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{remark}
+When $R + W > N$ the set of copies read always overlaps the set of copies written, so a read includes the latest value. This is how W and R move a system along the C--A trade-off of CAP.
+\end{remark}
+
+\subsection{When to use it, and limits}
+Use a KV database when performance matters most and the model is simple: no hierarchies and few relationships. If organization and management of data matter more, a relational database is better.
+
+Limits:
+\begin{itemize}
+  \item values can be looked up only by key. Some DBMSs add wildcard, range or Boolean search, or an \g{inverted index} on values, with an extra cost on each write;
+  \item they may not support range queries, except \s{ordered} KV databases;
+  \item there is no standard query language like SQL.
+\end{itemize}
+
+\begin{example}[Mobile app configuration]
+An app tracking shipments stores per-customer configuration (customer data, dashboard, alerts, UI). Operations are mostly reads by account number, so the key is \texttt{entity:account:attribute} with entities \texttt{cust}, \texttt{dash}, \texttt{alrt}, \texttt{ui}. Abbreviations must stay readable: the slides mark \texttt{dshb} as a bad choice.
+\end{example}

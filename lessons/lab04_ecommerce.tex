@@ -1,0 +1,84 @@
+\section{E-commerce Application}\label{sec:ecommerce}
+
+This case study puts together requirements, polyglot persistence and REST, and it is a template for the structure of the project code.
+
+\subsection{Requirements}
+An online shop sells different types of products (books, beers, monitors). The actors are:
+\begin{itemize}
+  \item \g{unregistered user}: browses products, views details and reviews, registers, logs in;
+  \item \g{customer}: manages the account and the shopping cart, does the checkout, follows orders;
+  \item \g{manager}: manages products and stock, browses customers and orders, changes order status, sees analytics.
+\end{itemize}
+Non-functional requirements drive the design: 50 orders per second (concurrency), availability $24\times7$ (replication), encrypted passwords (only hashes are stored), and REST services in Java.
+
+\subsection{Polyglot persistence}
+\begin{center}\small
+\begin{tabular}{p{6.7cm}p{6.7cm}}
+\toprule
+\textbf{MySQL: users, products, orders} & \textbf{Redis: shopping cart} \\
+\midrule
+structured data with relations & volatile, it can expire \\
+must never be lost & read and written very often \\
+transactions (checkout) & always accessed by customer id \\
+analytics with JOIN and GROUP BY & must be fast \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The product hierarchy uses one table per type (\texttt{ec\_book}, \texttt{ec\_beer}, \texttt{ec\_monitor}), and \texttt{ec\_product\_detail} links orders and products. The cart is one JSON value with a TTL of 600\,s:
+\begin{lstlisting}
+ecommerce:shopping-cart:4 =
+{ "customerId": 4,
+  "productCartList": [
+    { "productId": 4, "name": "Pisa Craft IPA", "quantity": 2, "total": 9.0 },
+    { "productId": 7, "name": "UltraView 27", "quantity": 1, "total": 289.0 } ] }
+\end{lstlisting}
+To add a product we GET the JSON, modify it in Java and SET it again. At checkout the order is saved in MySQL and the cart key is deleted from Redis.
+
+\subsection{Architecture}
+The application has three layers, and each layer calls only the one below it:
+\begin{center}
+\begin{tikzpicture}[font=\small, node distance=0.45cm,
+  b/.style={draw, rounded corners, minimum width=7cm, minimum height=0.75cm, fill=blue!6, align=center}]
+  \node[b] (c) {\g{controller}: REST endpoints, JSON in and out};
+  \node[b, below=of c] (s) {\g{service}: business logic};
+  \node[b, below=of s] (d) {\g{dao}: SQL queries and Redis commands};
+  \node[draw, rounded corners, below left=0.45cm and -2.8cm of d, minimum width=2.6cm] (m) {MySQL};
+  \node[draw, rounded corners, below right=0.45cm and -2.8cm of d, minimum width=2.6cm] (r) {Redis};
+  \draw[-{Latex}] (c) -- (s);
+  \draw[-{Latex}] (s) -- (d);
+  \draw[-{Latex}] (d) -- (m);
+  \draw[-{Latex}] (d) -- (r);
+\end{tikzpicture}
+\end{center}
+
+\begin{itemize}
+  \item \g{controller/}: one controller per actor. It maps endpoints and calls a service. It contains no SQL, no Redis commands and no business rules.
+  \item \g{service/}: interfaces (\s{what}) and \texttt{impl/} classes with \texttt{@Service} (\s{how}). For example \texttt{checkout()} checks stock, saves the order, updates the stock and deletes the cart. The controller depends only on the interface and Spring injects the implementation.
+  \item \g{dao/}: the \g{Data Access Object} layer is the only place with queries. It has one interface per entity, with implementations in \texttt{mysql/} (\texttt{JdbcTemplate}) and \texttt{redis/} (\texttt{RedisTemplate} and Gson). A \g{DAOFactory} chooses the database.
+  \item \g{model/}, \g{product/}: domain entities and product hierarchy.
+  \item \g{dto/}: \g{Data Transfer Objects}, what travels in JSON. An entity has everything, even the password hash, while a DTO has only what the client must send or receive.
+  \item \g{utils/}: constants (namespace, TTL, page size).
+\end{itemize}
+
+\begin{lstlisting}[language=Java]
+ProductDAO productDAO = daoFactory.getProductDAO(DataRepositoryEnum.MYSQL);
+\end{lstlisting}
+
+\paragraph{DAO or Repository?} A \s{repository} (Spring Data JPA) generates CRUD from an interface. A \s{DAO} is the general pattern where we write queries ourselves, so it works with any database, also non-relational ones. This makes it the natural structure for an application with several DBMSs.
+
+\paragraph{Data and errors.} A request goes JSON $\to$ DTO (controller) $\to$ entity (service) $\to$ query (DAO), and the response follows the opposite way. Errors go up too: a \texttt{DAOException} is wrapped into a \texttt{BusinessException}, and the \texttt{GlobalExceptionHandler} turns it into an HTTP status with a JSON message.
+
+\begin{example}[Add product to cart]
+\texttt{POST /api/customers/4/cart} with body \texttt{\{"productId": 4, "quantity": 2\}}:
+\begin{enumerate}
+  \item \texttt{CustomerController} receives the JSON as a \texttt{ProductCartDTO};
+  \item \texttt{ShoppingCartServiceImpl} reads name and price from MySQL through \texttt{ProductDAO};
+  \item \texttt{ShoppingCartRedisDAO} gets the cart, adds the product and sets it with TTL 600\,s;
+  \item the response is \texttt{200 OK} in a \texttt{ResponseWrapper} with message and total items.
+\end{enumerate}
+\end{example}
+
+\begin{remark}
+To add a feature, start from the controller and follow the arrows down one layer at a time: new endpoint, service rule, DAO query, then a test in Postman.
+\end{remark}

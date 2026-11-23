@@ -1,0 +1,171 @@
+\section{Choosing a Database}\label{sec:choosing}
+
+This section connects all the previous ones and is the core of the project design. There is no best database: every model optimizes one way of accessing data and pays for it somewhere else.
+
+\subsection{From requirements to the database}
+The steps to design an application are:
+\begin{enumerate}
+  \item requirements elicitation from the customer;
+  \item requirements definition, functional and non-functional;
+  \item use case definition (UML diagrams or mock-ups);
+  \item identification of the main data structures, procedures and relations (\s{analysis workflow});
+  \item refinement of the analysis, including the database design (\s{project workflow});
+  \item implementation and test;
+  \item deployment.
+\end{enumerate}
+These steps are iterative (\s{agile} approach). The choice of architecture, language and DBMS must be driven by \g{requirements}, \g{common sense} and \g{experience}.
+
+Two kinds of requirements guide the choice:
+\begin{itemize}
+  \item \g{Functional}: the types of queries, which tell us how data is used, the nature of the relationships and the flexibility needed.
+  \item \g{Non-functional}: volume of reads and writes, tolerance for inconsistent replicas, availability and disaster recovery, latency.
+\end{itemize}
+
+\begin{remark}
+Relational databases are still useful. They protect data integrity and reduce the risk of anomalies through immediate consistency and ACID transactions. NoSQL is justified when performance and availability matter more than these guarantees.
+\end{remark}
+
+\subsection{The questions to ask}
+For each requirement, we ask the following questions in order. The first answer that clearly applies suggests the candidate model.
+
+\begin{center}\small
+\begin{tabular}{p{7.6cm}p{5.9cm}}
+\toprule
+\textbf{Question} & \textbf{Candidate} \\
+\midrule
+Do I always access by identifier, with small and frequent operations? & Key-value \\
+Is data volatile, or a cache of something stored elsewhere? & Key-value / in-memory (Redis) \\
+Do I read an aggregate with variable attributes, filter on many fields or compute analytics? & Document \\
+Is the question ``how is X connected to Y'', with multi-hop paths? & Graph \\
+Hundreds of TB, very frequent writes, several data centers, predictable queries? & Column (wide-column) \\
+Do I need strict multi-record transactions and integrity constraints? & Relational \\
+Does all the data fit in RAM and is latency the priority? & In-memory \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Comparison of the models}
+\begin{center}\footnotesize
+\begin{tabular}{p{1.65cm}p{2.5cm}p{2.5cm}p{2.5cm}p{2.5cm}p{1.6cm}}
+\toprule
+& \textbf{Data unit} & \textbf{Strength} & \textbf{Weakness} & \textbf{Scaling} & \textbf{DBMS} \\
+\midrule
+Relational & row in a table & integrity, joins, ACID & horizontal scaling, rigid schema & mostly vertical & MySQL, PostgreSQL \\
+\addlinespace
+Key-value & value by key & speed, simplicity & only lookup by key & hashing, ring & Redis, Riak, DynamoDB \\
+\addlinespace
+Document & JSON document & flexible model, rich queries, aggregations & redundancy to keep aligned & replica set, sharding & MongoDB, CouchDB \\
+\addlinespace
+Column & cell (row, column, time) & write throughput, huge volumes, column analytics & single-row updates, predictable queries needed & peer-to-peer or regions & Cassandra, HBase \\
+\addlinespace
+Graph & vertex and edge & traversals, paths & aggregations, sharding, supernodes & mostly a single instance & Neo4j \\
+\addlinespace
+In-memory & depends on the model & minimal latency & limited by RAM, persistence & replication, cluster & Redis, TimesTen, HANA \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{Typical applications.}
+\begin{itemize}
+  \item \g{Key-value}: caching, transient attributes (shopping cart, sessions), configuration, large objects.
+  \item \g{Document}: website back-ends with many reads and writes, products with variable attributes, JSON applications, data that benefits from embedding.
+  \item \g{Column}: security analytics on logs, scientific data, stock market data, web-scale search, social network content. Avoid them if the data fits on one server.
+  \item \g{Graph}: IT infrastructure, logistics, recommendations, social networks.
+\end{itemize}
+
+\begin{remark}
+A connection is not just a shared attribute. Two orders of the same customer share an attribute but are not really connected, so they do not need a graph. Employees working together or users following each other are real connections.
+\end{remark}
+
+\subsection{Polyglot persistence}
+We are not obliged to use one DBMS: different models can cooperate, each one for what it does best.
+\begin{itemize}
+  \item \s{E-commerce}: document database for the catalog, graph for recommendations, key-value for the cart.
+  \item \s{Transactions and analytics}: relational for OLTP, MongoDB for fast OLAP.
+\end{itemize}
+
+\begin{example}[Real-estate platform, Home Explore]
+The design principle is that each database holds one kind of data: MongoDB the \s{complete and historical} information, the graph the \s{selected redundant attributes} for search and recommendation, Redis the \s{current operational state}.
+\begin{center}\footnotesize
+\begin{tabular}{p{4.4cm}p{1.5cm}p{1.9cm}p{4.6cm}}
+\toprule
+\textbf{Functionality} & \textbf{Main} & \textbf{Support} & \textbf{How} \\
+\midrule
+Registration and login & MongoDB & -- & accounts, roles, profile \\
+Property management & MongoDB & Graph & selected attributes copied in the graph \\
+Sale listing & Redis & MongoDB & current state and reference to the property \\
+Property search & Graph & Mongo, Redis & match in the graph, check listing, load details \\
+Nearby points of interest & Graph & MongoDB & traversal, then details \\
+Similar properties & Graph & MongoDB & similarity computed, not stored \\
+Appointments & Redis & -- & slots and bookings \\
+Purchase & MongoDB & Redis & creates the deal, updates the listing \\
+Market analytics & MongoDB & -- & aggregations on completed deals \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{example}
+
+\subsection{Consistency between different databases}\label{sec:consistency-between-dbs}
+With redundant data, one logical update means several writes on different DBMSs. No one guarantees them as a unit: if one fails, the databases diverge, and the application must handle this. Design rules:
+\begin{itemize}
+  \item Define one \g{source of truth} for each piece of data. The other copies are derived.
+  \item Never make a join across two databases in one go: query one, then use the result to query the other.
+  \item Store in the graph only the attributes needed by the traversals.
+  \item Propagate updates with \g{retry and timeout} (the idea of \s{hinted handoff}), rather than with rollback.
+  \item Run periodic jobs \s{outside} the application server, otherwise each server replica repeats the same writes.
+  \item Declare where eventual consistency is an accepted product choice, and where it is not.
+\end{itemize}
+
+\subsection{Replication, sharding and CAP in the design}
+For each database we must be able to justify:
+\begin{itemize}
+  \item \g{Position in CAP}: what happens during a partition, and why it is acceptable for this application.
+  \item \g{Replication}: number of replicas and the balance between read and write guarantees (W, R, read preference).
+  \item \g{Sharding}: shard key and algorithm. Hash balances writes but scatters range queries, range supports them but risks \g{hot spots} on the most recent values.
+  \item \g{Indexes}: a read gain paid at each write. They must follow the actual workload.
+\end{itemize}
+
+\subsection{Project checklist}
+The project requires an application with a big dataset on at least two NoSQL architectures, with the \g{document database mandatory}, exposed as a service through REST APIs. The requirements that directly affect the database choice are:
+
+\begin{center}\small
+\begin{tabular}{p{3cm}p{10.7cm}}
+\toprule
+\textbf{Area} & \textbf{Requirement} \\
+\midrule
+Dataset & real, at least 50/100\,MB, with variety and/or velocity/variability \\
+All DBs & CRUD on each architecture, analytics as main functionalities \\
+Document & at least 3 real aggregation pipelines, indexes justified and validated experimentally \\
+Graph & at least a couple of on-graph queries, both domain-specific and graph-centric, indexes only if needed \\
+Key-value & at least 2 entities and 1 one-to-many or many-to-many relationship \\
+Deployment & local and virtual cluster, ``at least three replica sets'' for the document DB, managed in terms of eventual consistency \\
+Neo4j & replicas not mandatory, one instance on the virtual cluster with the document DB \\
+Key-value deploy & 3 replicas on the virtual cluster \\
+Consistency & explicit management between the different DBs \\
+Partitioning & argue (and possibly design) sharding for document and key-value DBs \\
+After deploy & considerations on CAP, performance tests on reads and writes \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{remark}
+The aggregation pipelines must not use \texttt{\$lookup}, which the slides mark as forbidden. If a pipeline needs data from another collection, the required fields must be embedded or duplicated in the model.
+\end{remark}
+
+\begin{example}[Applying the method to our F1 social network]
+The questions above lead to the following assignment. The key-value part is still to be decided.
+\begin{center}\footnotesize
+\begin{tabular}{p{4.9cm}p{1.8cm}p{6.1cm}}
+\toprule
+\textbf{Data or query} & \textbf{DB} & \textbf{Why} \\
+\midrule
+Races, laps, pit stops, predictions & Document & aggregates, volume, analytics pipelines \\
+Strategy and tyre analytics & Document & grouping and statistics, no traversal \\
+Follows, leagues & Graph & real connections, source of truth for them \\
+Who to follow, teammate paths & Graph & multi-hop and shortest path queries \\
+Sessions, live leaderboard (optional) & Key-value & access by key, volatile, high frequency \\
+\bottomrule
+\end{tabular}
+\end{center}
+Availability during race weekends suggests an AP position, except for accepting a prediction before the deadline, which needs a stronger write guarantee on that collection only.
+\end{example}

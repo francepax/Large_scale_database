@@ -1,0 +1,41 @@
+\section{In-memory Databases}\label{sec:inmemory}
+
+Not every application needs huge volumes and horizontal scaling. If the data fits in the memory of a single server, or of a small cluster when replication is needed, an in-memory database may be the right choice.
+
+Main features:
+\begin{itemize}
+  \item very fast access, because there is no I/O bottleneck;
+  \item suitable for applications that do not need to write continuously to a persistent medium;
+  \item \g{cache-less architecture}: everything is already in memory;
+  \item an ad-hoc \s{persistence model}, to avoid losing data on power failure.
+\end{itemize}
+
+\subsection{Persistence}
+Three solutions avoid data loss, usually combined:
+\begin{itemize}
+  \item \g{Snapshots} (checkpoints): complete database images written to disk.
+  \item \g{Transaction log} (journal): operations appended to a disk file.
+  \item \g{Replication} to other members of a cluster.
+\end{itemize}
+After a crash the system restores the last snapshot and replays the log. If log writes are asynchronous we are fast but can lose the last operations; if they are synchronous we have ACID durability at the cost of performance.
+
+\subsection{Main systems}
+\begin{itemize}
+  \item \g{Oracle TimesTen}: SQL relational model with all data in memory. Persistence uses periodic snapshots and a transaction log. Disk writes are asynchronous by default and can be made synchronous to ensure ACID.
+  \item \g{Redis}: in-memory key-value store whose objects are strings and collections of strings (lists, hashes, \dots). Only primary-key lookups are supported, so secondary indexes need special attention. It has asynchronous master/slave replication: if performance is critical and some data loss is acceptable, the master runs with minimal persistence and a replica acts as backup. Details in \cref{sec:redis}.
+  \item \g{SAP HANA}: relational, in-memory and columnar. \g{Row tables} are always in memory and serve OLTP; \g{column tables} are compressed, loaded on demand and serve OLAP. Persistence uses \s{savepoints} and a \s{redo log}.
+  \item \g{Oracle 12c}: data on disk and cached in memory. OLTP works mainly on memory and commits go to the log on disk. Row data is also loaded in a columnar representation for analytics. Later commits are recorded in a journal, which analytic queries consult to decide whether to read the updated rows or rebuild the columnar structure.
+\end{itemize}
+
+\paragraph{Delta store in HANA.} Columnar storage is bad for frequent writes, so writes go through several levels and are periodically consolidated by a \g{delta merge}:
+\begin{center}\small
+\begin{tabular}{llll}
+\toprule
+\textbf{Level} & \textbf{Orientation} & \textbf{Compression} & \textbf{Purpose} \\
+\midrule
+L1 delta & row & none & fast inserts and updates \\
+L2 delta & column & light & intermediate buffer \\
+Main store & column & high & read-optimized, used by queries \\
+\bottomrule
+\end{tabular}
+\end{center}

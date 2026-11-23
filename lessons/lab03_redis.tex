@@ -1,0 +1,139 @@
+\section{Redis}\label{sec:redis}
+
+Redis is the concrete implementation of the key-value (\cref{sec:kv}) and in-memory (\cref{sec:inmemory}) models that we use in the lab.
+
+\g{Redis} (REmote DIctionary Server) is an in-memory \g{data structure server}. It is traditionally used as a \g{cache} in front of a main database, and it can also work as primary database, message broker and streaming engine. The typical cache flow is: look for the data in Redis; if found, return it; otherwise read the main database and store the result in Redis.
+
+\paragraph{When to use it.} With \s{volatile data} (a shopping cart), with data \s{read often and rarely modified} (list of countries), and when we \s{access only by identifier} and want a low response time (best sellers page). For example, Trenitalia removes tickets from the cart after 10 minutes.
+
+\subsection{Keys and commands}
+Keys are unique and \s{binary safe}, so any byte sequence is valid, and the maximum size is 512\,MB. They should be readable, not too long, and follow a schema with a namespace for the application:
+\begin{lstlisting}
+EntityName:EntityID:EntityAttribute
+
+sales-app:invoice:10012:status = "PAID"
+user:1000:followers                     (good, instead of u1000flw)
+comment:4321:reply.to
+shopping-cart:5431:updated-date
+\end{lstlisting}
+
+Redis has several datatypes, but in the course we work only with \g{strings}.
+\begin{lstlisting}
+SET <key> <value>            GET <key>            DEL <key>
+SET <key> <value> EX <sec>   EXPIRE <key> <sec>   TTL <key>
+
+SET counter 10
+INCR counter                 // 11, atomic
+INCRBY counter 5             DECR counter         DECRBY counter 3
+\end{lstlisting}
+
+\begin{remark}
+If two clients read a counter and write back the value plus one, an update is lost. \g{INCR} and the similar commands are \s{atomic}, so they solve this problem.
+\end{remark}
+
+\paragraph{Pipelining.} Several commands are sent at once without waiting for each response, saving \g{round trip times}.
+
+\subsection{Transactions}
+A transaction executes a group of commands serialized and in sequence.
+\begin{itemize}
+  \item \g{MULTI} starts it, and the following commands are queued.
+  \item \g{EXEC} runs all the queued commands.
+  \item \g{DISCARD} drops the queue. \s{Redis does not support rollbacks.}
+  \item \g{WATCH} monitors keys: if another client modifies them before EXEC, the transaction is aborted and EXEC returns \texttt{(nil)}.
+\end{itemize}
+
+\subsection{Jedis}
+\g{Jedis} is the Java client for Redis, where commands are methods of the \texttt{Jedis} class. It already includes \s{Gson} for JSON serialization.
+\begin{lstlisting}[language=Java]
+// <groupId>redis.clients</groupId> <artifactId>jedis</artifactId> <version>7.0.0</version>
+try (JedisPool pool = new JedisPool("localhost", 6379);   // pool: better performance
+     Jedis jedis = pool.getResource()) {
+    String key = "my-app:some-key";
+    jedis.set(key, "Hello world!");
+    jedis.expire(key, 10);
+    String value = jedis.get(key);
+    long ttl = jedis.ttl(key);
+
+    jedis.watch(key);
+    Transaction t = jedis.multi();
+    t.set(key, "New value");
+    t.set("my-app:key-2", "Other value");
+    List<Object> result = t.exec();   // null if a watched key was modified
+}
+\end{lstlisting}
+
+\subsection{Memory and persistence}
+When \texttt{maxmemory} is reached, the \g{eviction policy} (\texttt{maxmemory-policy}) applies. By default \texttt{maxmemory} is 0 (unlimited) and the policy is \texttt{noeviction}.
+
+\begin{center}\small
+\begin{tabular}{ll}
+\toprule
+\textbf{Policy} & \textbf{Behaviour} \\
+\midrule
+\texttt{noeviction} & new values are not saved \\
+\texttt{allkeys-lru} / \texttt{allkeys-lfu} & removes the least recently / frequently used keys \\
+\texttt{volatile-lru} / \texttt{volatile-lfu} & same, only among keys with an expiration \\
+\texttt{allkeys-random} / \texttt{volatile-random} & removes random keys (all / with expiration) \\
+\texttt{volatile-ttl} & removes keys with the shortest remaining TTL \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\g{Persistence} options:
+\begin{itemize}
+  \item \g{RDB}: point-in-time snapshots at given intervals;
+  \item \g{AOF} (Append Only File): log of every write operation, more durable but slower;
+  \item \g{RDB + AOF}: combination of the two, and the AOF is used to reconstruct the dataset;
+  \item \g{no persistence}: data exists only while the server runs.
+\end{itemize}
+
+\subsection{Replication and cluster}
+With a replica, if the primary goes down the replica takes over. Replication is \g{asynchronous} by default, so writes not yet propagated can be lost, but it can be made synchronous for some data.
+
+A \g{Redis Cluster} distributes the keys over the nodes using \g{hash slots}:
+\[
+\mathrm{HASH\_SLOT} = \mathrm{CRC16}(key) \bmod 16384.
+\]
+Each master owns a range of slots (for example A: 0--5500, B: 5501--11000, C: 11001--16383) and can have replicas. The client computes the slot to reach the right master.
+
+\begin{lstlisting}
+# in each folder 7000 ... 7005, file redis.conf (change the port)
+port 7000
+cluster-enabled yes
+cluster-config-file nodes.conf
+cluster-node-timeout 5000
+appendonly yes
+
+redis-server ./redis.conf          # in each folder
+redis-cli --cluster create 127.0.0.1:7000 127.0.0.1:7001 127.0.0.1:7002 \
+  127.0.0.1:7003 127.0.0.1:7004 127.0.0.1:7005 --cluster-replicas 1
+redis-cli -c -p 7000               # -c follows the redirections
+\end{lstlisting}
+In Java we use \g{JedisCluster}, which routes each command to the right node and handles failover:
+\begin{lstlisting}[language=Java]
+Set<HostAndPort> nodes = new HashSet<>();
+nodes.add(new HostAndPort("127.0.0.1", 7001));
+nodes.add(new HostAndPort("127.0.0.1", 7002));
+try (JedisCluster jedis = new JedisCluster(nodes)) { /* ... */ }
+\end{lstlisting}
+
+\subsection{Notifications and Pub/Sub}
+\g{Keyspace notifications} report changes on keys in real time through Pub/Sub channels. They are disabled by default. \g{Keyspace} events concern a specific key (\texttt{\_\_keyspace@0\_\_:mykey}), \g{keyevent} events concern an action on any key (\texttt{\_\_keyevent@0\_\_:expired}). The \texttt{@0} is the database index (Redis has 16 databases by default).
+\begin{lstlisting}
+config set notify-keyspace-events Ex     # keyevent + expired
+subscribe __keyevent@0__:expired
+
+publish my-channel "Hello clients!"      # returns the number of receivers
+subscribe my-channel
+\end{lstlisting}
+With \g{Publish/Subscribe}, a message published on a channel reaches all its subscribers. In Jedis we extend \g{JedisPubSub} (\texttt{onMessage}, \texttt{onPMessage}) and call \texttt{subscribe} or \texttt{psubscribe}, which are blocking.
+\begin{lstlisting}[language=Java]
+JedisPubSub listener = new JedisPubSub() {
+    @Override public void onMessage(String channel, String message) {
+        System.out.println(channel + ": " + message);
+    }
+};
+try (Jedis jedis = pool.getResource()) {
+    jedis.subscribe(listener, "Channel1", "Channel2");   // blocking
+}
+\end{lstlisting}

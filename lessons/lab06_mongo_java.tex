@@ -1,0 +1,157 @@
+\section{MongoDB Java Driver}\label{sec:mongo-java}
+
+The \g{MongoDB Java Driver} lets a Java application work on the data stored in MongoDB (current version 5.6). We use \g{mongodb-driver-sync}: \s{sync} means \s{synchronous}, so each call waits for the answer of the server, like in JDBC. With Maven we add to the \texttt{pom.xml}:
+\begin{lstlisting}
+<dependency>
+    <groupId>org.mongodb</groupId>
+    <artifactId>mongodb-driver-sync</artifactId>
+    <version>5.6.0</version>
+</dependency>
+\end{lstlisting}
+
+\subsection{Connection}
+\g{MongoClients.create(connectionString)} opens a connection to a running instance. The \g{connection string} has the form
+\begin{center}
+\texttt{mongodb://}\,\s{user:pass}\texttt{@}\,\s{host:port}\,\texttt{/?}\s{options}
+\end{center}
+for example \texttt{mongodb://user:pass@localhost:27017/?maxPoolSize=20\&w=majority}. For a replica set we list several hosts. The behaviour of the client (timeouts, pool size, credentials, read and write concern) can also be set with a \g{MongoClientSettings} object, built with a builder and passed to \s{MongoClients.create}.
+
+A \g{MongoClient} is a \s{pool of connections} and it is \s{thread-safe}. So we create \s{one} MongoClient per deployment (standalone, replica set or sharded cluster) and reuse it in the whole application, even with many threads. We call \texttt{close()} only when it is no longer needed, at the end of the application.
+
+\begin{lstlisting}
+import com.mongodb.ConnectionString;
+import com.mongodb.client.*;
+import org.bson.Document;
+
+ConnectionString uri = new ConnectionString("mongodb://localhost:27017");
+MongoClient myClient = MongoClients.create(uri);
+MongoDatabase database = myClient.getDatabase("mydb");
+MongoCollection<Document> collection = database.getCollection("test");
+// ... insert, find, update, delete ...
+myClient.close();
+\end{lstlisting}
+As in the shell, \s{getDatabase} and \s{getCollection} do not fail if the database or the collection does not exist: it is created when we first store data in it. \g{Document} (package \texttt{org.bson}) is the Java representation of a MongoDB document.
+
+\subsection{Collections}
+\begin{lstlisting}
+database.createCollection("exampleCollection");
+for (String name : database.listCollectionNames()) System.out.println(name);
+database.getCollection("bass").drop();   // deletes all documents and indexes!
+\end{lstlisting}
+Even if MongoDB is schema-less, we can ask it to \g{validate} the documents during writes. This is useful for an established application, when we already know how the data is organized: all inserts must match the rules, and the \s{validation level} decides how the rules apply to existing documents and to updates.
+\begin{lstlisting}
+ValidationOptions collOptions = new ValidationOptions().validator(
+    Filters.or(Filters.exists("commander"), Filters.exists("first officer")));
+database.createCollection("ships",
+    new CreateCollectionOptions().validationOptions(collOptions));
+\end{lstlisting}
+
+\subsection{CRUD}
+A document is built with \s{append}, or parsed from a JSON string:
+\begin{lstlisting}
+// { name: "MongoDB", count: 1, versions: [...], info: { x: 203, y: 102 } }
+Document doc = new Document("name", "MongoDB")
+        .append("count", 1)
+        .append("versions", Arrays.asList("v3.2", "v3.0", "v2.6"))
+        .append("info", new Document("x", 203).append("y", 102));
+
+Document doc2 = Document.parse("{\"name\": \"Mario\", \"surname\": \"Rossi\"}");
+
+collection.insertOne(doc);
+collection.insertMany(documents);          // List<Document>
+System.out.println(collection.countDocuments());
+\end{lstlisting}
+If a document has no \s{\_id}, the driver adds an ObjectId.
+
+\paragraph{Find.} \s{find()} without arguments returns all the documents; with a filter only the matching ones. Filters are built with the static methods of the \g{Filters} helper (\texttt{eq}, \texttt{ne}, \texttt{gt}, \texttt{gte}, \texttt{lt}, \texttt{lte}, \texttt{in}, \texttt{and}, \texttt{or}, \texttt{exists}, \dots). The result is read through a \g{MongoCursor}, which fetches the results in batches; we open it in a \s{try-with-resources} so that it is always closed, like a \s{ResultSet} in JDBC.
+\begin{lstlisting}
+import static com.mongodb.client.model.Filters.*;
+
+// 50 < i <= 100, same as { i: { $gt: 50, $lte: 100 } }
+try (MongoCursor<Document> cursor =
+         collection.find(and(gt("i", 50), lte("i", 100))).iterator()) {
+    while (cursor.hasNext()) System.out.println(cursor.next().toJson());
+}
+
+// alternatives: a lambda, or collect everything in a list
+collection.find().forEach(d -> System.out.println(d.toJson()));
+List<Document> results = collection.find().into(new ArrayList<>());
+\end{lstlisting}
+
+\paragraph{Update and delete.} \s{updateOne} and \s{updateMany} take a filter and an update, built with the \g{Updates} helper (\texttt{set}, \texttt{unset}, \texttt{inc}, \texttt{push}, \dots). \s{deleteOne} and \s{deleteMany} take only a filter. They return an \g{UpdateResult} or a \g{DeleteResult} with the number of modified or deleted documents.
+\begin{lstlisting}
+import static com.mongodb.client.model.Updates.*;
+
+collection.updateOne(eq("name", "Mario"), set("age", 28));
+UpdateResult ur = collection.updateMany(lt("i", 100), inc("i", 100));
+System.out.println(ur.getModifiedCount());
+
+collection.deleteOne(eq("i", 110));
+DeleteResult dr = collection.deleteMany(gte("i", 100));
+System.out.println(dr.getDeletedCount());
+\end{lstlisting}
+
+\subsection{Aggregation in Java}
+\s{MongoCollection.aggregate()} takes the list of stages. Each stage is a \texttt{Bson} object built with the helpers \g{Aggregates}, \g{Accumulators}, \g{Projections}, \g{Sorts} and \g{Filters}. With static imports the code is close to the shell syntax.
+\begin{lstlisting}
+import static com.mongodb.client.model.Aggregates.*;
+import static com.mongodb.client.model.Accumulators.*;
+import static com.mongodb.client.model.Projections.*;
+import static com.mongodb.client.model.Sorts.*;
+import static com.mongodb.client.model.Filters.*;
+
+// db.collection.aggregate([ { $match: { categories: "Bakery" } },
+//   { $group: { _id: "$stars", count: { $sum: 1 } } } ])
+Bson myMatch = match(eq("categories", "Bakery"));
+Bson myGroup = group("$stars", sum("count", 1));
+collection.aggregate(Arrays.asList(myMatch, myGroup))
+          .forEach(d -> System.out.println(d.toJson()));
+\end{lstlisting}
+
+Examples of the single stages:
+\begin{lstlisting}
+// $match
+match(gte("pop", 50000));
+match(and(eq("name", "XYZ Coffee Bar"), eq("categories", "Coffee")));
+
+// $group on one field
+group("$city", sum("totPop", "$pop"));
+// $group on several fields: write the document directly
+new Document("$group",
+    new Document("_id", new Document("city", "$city").append("state", "$state"))
+        .append("totalPop", new Document("$sum", "$pop")));
+
+// $project
+project(fields(include("city")));
+project(fields(excludeId(), include("city", "state")));
+project(fields(computed("myID", "$_id"), include("city")));
+
+// $sort
+sort(descending("pop"));
+sort(ascending("city"), descending("pop"));
+
+// $skip and $limit: 2nd and 3rd most populated cities
+Arrays.asList(sort(descending("pop")), skip(1), limit(2));
+
+// $unwind: average score of the restaurants with American cuisine
+Arrays.asList(match(eq("cuisine", "American")),
+              unwind("$grades"),
+              group("$cuisine", avg("avgScore", "$grades.score")));
+\end{lstlisting}
+
+\subsection{Indexes}
+\s{createIndex()} takes an \g{index specification} document with the fields to index and their order: \texttt{1} ascending, \texttt{-1} descending. With more fields we get a \s{compound} index.
+\begin{lstlisting}
+collection.createIndex(new Document("city", 1));
+collection.createIndex(Indexes.ascending("city"));             // same, with the helper
+collection.createIndex(new Document("state", 1).append("pop", -1));  // compound
+\end{lstlisting}
+In the shell the same is \texttt{db.zips.createIndex(\{ city: 1 \})}.
+
+\subsection{Exercises}
+\begin{itemize}
+  \item \g{Zips dataset}: (1) zip codes of the Texan cities; (2) zips of the cities with a population between 100{,}000 and 200{,}000; (3) the 5 most populated cities; (4) for each state, the average population of its cities.
+  \item \g{Posts dataset}: (1) posts published after 2012-11-20; (2) posts with the tag \s{computer}; (3) for each tag, the total number of posts; (4) the top three commentators by number of comments; (5) the most versatile commentator, that is the one who commented on the highest number of distinct tags, with at least five comments per tag.
+\end{itemize}
+Examples on these datasets:
+\begin{center}\small\url{https://www.mongodb.com/developer/languages/java/java-aggregation-pipeline/}\end{center}

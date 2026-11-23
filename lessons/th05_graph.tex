@@ -1,0 +1,139 @@
+\section{Graph Databases}\label{sec:graph}
+
+Key-value and document databases answer ``What are the attributes of X?''. When the main question becomes ``How is X connected to Y?'', relationships must be first-class data.
+
+\subsection{Recap about graphs}
+A graph is a data structure composed of nodes (\g{vertices}), where each node represents an instance of an entity, and links between the nodes (\g{edges}), which represent relations between instances. Both can have properties. Links may also carry a weight (\s{weighted graph}), representing for example a cost or a distance. A graph may be \g{undirected} or \g{directed}, depending on the specific application. Inside a graph we can define a \g{path} as a sequence of nodes where each pair of consecutive nodes is connected by a link. There may be multiple paths between two nodes. We can also identify \g{loops}, which represent a relation that a node has with itself. The \g{intersection} of two graphs $A$ and $B$ is the set of vertices and edges that are common to both graphs. The \g{union} of $A$ and $B$ is the set of vertices and edges from both graphs. Two graphs are \g{isomorphic} if there exists a one-to-one correspondence between their vertices that preserves the relations between the nodes. \s{Subgraph isomorphism} is useful to detect recurring patterns in a larger graph.
+
+The \g{order} is the number of vertices and the \g{size} the number of edges: the higher they are, the more expensive the queries.
+
+For the nodes we can define the \g{degree}, the number of links incident to a node, and the \g{closeness}, how close a vertex is to all other vertices, based on shortest-path distances.
+
+\begin{definition}[Closeness centrality]
+Let $G$ be a connected graph with $n$ vertices and let $d(v,u)$ be the shortest-path distance between $v$ and $u$. The closeness centrality of a vertex $v$ is
+\[
+C_C(v) = \frac{n-1}{\sum_{u \neq v} d(v,u)}.
+\]
+\end{definition}
+
+Vertices with high closeness can reach the other vertices through relatively few connections. The \g{betweenness} measures how often a vertex lies on the shortest paths between other pairs of vertices: vertices with high betweenness act as bridges or bottlenecks, even if removing them does not necessarily disconnect the graph.
+
+\paragraph{Traversal.} \g{Graph traversal} is the systematic exploration of a graph along its edges. \g{BFS} visits the graph level by level, \g{DFS} follows a path as deep as possible before backtracking. A traversal does not necessarily find the shortest path.
+
+\paragraph{Special graphs.}
+\begin{itemize}
+  \item \g{Flow network}: directed graph where each edge has a non-negative \s{capacity}, with a \s{source} and a \s{sink}. The flow on an edge cannot exceed the capacity. Flow conservation (incoming equals outgoing at intermediate vertices) is a specific, non-mandatory requirement.
+  \item \g{Bipartite graph}: two sets of vertices, with edges only between the sets (students and teachers).
+  \item \g{Multigraph}: multiple edges between the same vertices, each with its own properties (shipping by plane or by truck).
+\end{itemize}
+
+\subsection{Why graph databases?}
+
+A graph database makes the connections between entities explicit, and it is good for queries that follow patterns and paths between entities. If the main question is not ``What are the attributes of X?'' but ``How is X connected to Y?'', then you should consider a graph database. Some examples of queries that work well with graph databases are:
+\begin{enumerate}
+  \item Which courses does Alice attend?\\
+        \s{1 hop}: Student $\rightarrow$ Course
+  \item Which topics are covered by Alice's courses?\\
+        \s{2 hops}: Student $\rightarrow$ Course $\rightarrow$ Topic
+  \item Which other students share topics with Alice?\\
+        \s{3+ hops}: Student $\rightarrow$ Course $\rightarrow$ Topic $\rightarrow$ Course $\rightarrow$ Student
+\end{enumerate}
+Each question requires a longer path, and increasing the path depth changes the nature of the query. In a relational database relationships are rebuilt through joins. Simple joins are efficient, but deep or unbounded paths need repeated joins or recursion, and each level adds response time.
+
+\begin{example}[Co-stars of an actor]
+In SQL we need four joins, while in Cypher (the Neo4j query language) the query is the path itself:
+\begin{lstlisting}
+SELECT p2.personname, m1.moviename
+FROM people p1
+  JOIN actors a1 ON (p1.personid = a1.personid)
+  JOIN movies m1 ON (a1.movieid = m1.movieid)
+  JOIN actors a2 ON (m1.movieid = a2.movieid)
+  JOIN people p2 ON (a2.personid = p2.personid)
+WHERE p1.personname = 'Keanu Reeves';
+
+MATCH (k:Person {name: "Keanu Reeves"})-[:ACTED_IN]->(m)<-[:ACTED_IN]-(coStar)
+RETURN coStar.name;
+\end{lstlisting}
+\end{example}
+
+\begin{center}\small
+\begin{tabular}{p{6.8cm}p{6.8cm}}
+\toprule
+\textbf{Good fit} & \textbf{Not necessarily a good fit} \\
+\midrule
+frequent multi-hop navigation & simple key-based retrieval (cart by customer: KV) \\
+several relationship types & mostly independent documents (catalog: document) \\
+connected, evolving domain & primarily tabular aggregations (relational, columnar) \\
+path-oriented queries (best route) & strongly constrained transactions (bank transfers) \\
+discovery of indirect links (fraud) & \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{remark}
+\s{The graph model is not a free performance boost.} Finding the start node may need an index, the traversal cost grows with the explored portion of the graph, and global analyses (communities, centrality) can be expensive even on a graph database. The choice must compare the actual workloads.
+\end{remark}
+
+\subsection{Graph database design}
+Queries drive the design here too. There is less emphasis on selecting by property or aggregating across entities, which are better served by other models. Given the requirements and the UML analysis class diagram:
+\begin{enumerate}
+  \item identify the queries we would like to perform;
+  \item identify the entities of the graph;
+  \item identify the relations between entities, focusing only on combinations useful for the queries;
+  \item map domain-specific queries to graph-centric queries;
+  \item implement the queries and use graph algorithms.
+\end{enumerate}
+
+\begin{center}\small
+\begin{tabular}{p{6.9cm}p{6.7cm}}
+\toprule
+\textbf{Domain-specific query} & \textbf{Graph-centric query} \\
+\midrule
+How many follows separate developer A from B? & hops from vertex A to vertex B \\
+How many developers follow John Doe? & incoming edges of vertex A \\
+How well connected is Jane Doe? & centrality of vertex B \\
+What happens if a developer leaves? & is vertex C a bottleneck? \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{Advice.}
+\begin{itemize}
+  \item Watch the \g{dimension} of the graph and store only the properties needed. Full data stays in another database.
+  \item Define and use \g{indexes}, mainly to find the starting nodes.
+  \item Prefer simple edges: properties require memory.
+  \item \g{Watch for cycles}: keep track of visited nodes to avoid endless traversals.
+  \item Choose edge direction by semantics (\texttt{Actor -ACTED\_IN-> Movie}) and distinguish symmetric relations (\texttt{IS\_FRIEND\_OF}) from asymmetric ones (\texttt{FOLLOWS}).
+  \item \g{Avoid redundant inverse edges}: in property graph DBMSs like Neo4j an edge can be traversed in both directions regardless of the stored direction, because each node keeps its incoming and outgoing relationships.
+\end{itemize}
+
+Reverse traversal has two risks:
+\begin{itemize}
+  \item \g{Supernode}: a node with hundreds of thousands of edges forces Neo4j to loop over all of them, slowing down the local search.
+  \item \g{Path explosion}: deep traversals through dense nodes produce an exponential number of paths, with a heavy impact on RAM and CPU.
+\end{itemize}
+
+\begin{remark}
+Replication in graph databases is generally available in enterprise editions (Neo4j Enterprise, Amazon Neptune). Sharding is hard because it creates cross-shard relationships. In the project, replicas of Neo4j are not mandatory on the virtual cluster, but one instance must run together with the document database.
+\end{remark}
+
+\subsection{Case study: a social network for developers}\label{sec:social-network}
+This example is the closest to our project. The use cases are: join and leave, follow developers, post questions, answer them, get suggestions of new connections, and rank members by connections, posts and answers.
+
+The entities are \texttt{Developer} (name, location, experience, interests) and \texttt{Post} (date, topics, type, title, body). Among the candidate relations we keep only those supporting the queries:
+\begin{center}
+\begin{tikzpicture}[font=\small, node distance=4cm,
+  n/.style={draw, circle, minimum size=1.5cm, align=center, fill=blue!8}]
+  \node[n] (d) {Developer};
+  \node[n, right=of d] (p) {Post};
+  \draw[-{Latex}] (d) -- node[above] {\texttt{CREATED}} (p);
+  \draw[-{Latex}] (d) to[out=120, in=60, looseness=5] node[above] {\texttt{FOLLOWS}} (d);
+  \draw[-{Latex}] (p) to[out=120, in=60, looseness=5] node[above] {\texttt{RESPONSE\_TO}} (p);
+\end{tikzpicture}
+\end{center}
+
+\begin{itemize}
+  \item \g{Feed}: the posts of the followed developers. The depth of the path is a parameter handled by the application.
+  \item \g{Suggestions}: interests are declared in the profile or inferred from posts, giving a higher weight to own posts (L1, weight 2) than to posts of followed developers (L2, weight 1). A similarity score ranks the candidates. Scanning all the users is too expensive, so we limit the candidates to \s{followers of followers}.
+  \item \g{Ranking}: based on incoming and outgoing edges, or on counters updated at each new connection, post or answer, without scanning the whole graph.
+\end{itemize}

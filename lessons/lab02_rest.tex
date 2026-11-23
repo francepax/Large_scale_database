@@ -1,0 +1,101 @@
+\section{RESTful APIs and Spring Boot}\label{sec:rest}
+
+The project application is a service that exposes its functionalities through REST APIs, so this is the layer on top of all our databases.
+
+\subsection{REST principles}
+\g{REST} (Representational State Transfer) is an architectural style, not a specification: a loose set of rules that is the de facto standard for web APIs. A \g{resource} is any named piece of information, identified by a \g{URI}. Clients send HTTP requests to manipulate resources and the server answers with their state, usually in JSON.
+
+\begin{center}\small
+\begin{tabular}{llll}
+\toprule
+\textbf{Method} & \textbf{CRUD} & \textbf{Example} & \textbf{Idempotent} \\
+\midrule
+POST & Create & \texttt{POST /events} & no \\
+GET & Read & \texttt{GET /events} & yes \\
+PUT & Update & \texttt{PUT /events/\{id\}} & yes \\
+DELETE & Delete & \texttt{DELETE /events/\{id\}} & yes \\
+\bottomrule
+\end{tabular}
+\end{center}
+\texttt{PATCH} does partial updates and \texttt{OPTIONS} lists the available methods. An operation is \g{idempotent} if repeating it has the same effect as doing it once, so it can be safely retried.
+
+Best practices:
+\begin{itemize}
+  \item use \g{nouns} in URIs: \texttt{/api/v3/products}, not \texttt{/getAllProducts};
+  \item be \g{stateless}: each request is self-contained, which makes the application easy to scale;
+  \item return correct \g{status codes}: \texttt{2xx} success (200 OK, 201 Created, 204 No Content), \texttt{3xx} redirection, \texttt{4xx} client error (400, 404), \texttt{5xx} server error;
+  \item use \g{pagination} for large results: \texttt{GET /events?limit=20\&offset=40};
+  \item use \g{versioning} for backward compatibility: \texttt{/api/v1/events};
+  \item secure the API with authentication and authorization.
+\end{itemize}
+
+\subsection{Spring Boot}
+\g{Spring Boot} simplifies the development of Java REST services with \s{convention over configuration}: auto-configuration, built-in HTTP support and an embedded Tomcat server (port 8080). A project is created with Spring Initializr and organized in packages:
+\begin{itemize}
+  \item \g{controller}: maps HTTP requests to methods, without business logic;
+  \item \g{service}: business logic;
+  \item \g{repository}: data access;
+  \item \g{model}: entity classes;
+  \item \g{config}: configuration classes (\texttt{@Configuration}), for security, beans and Swagger;
+  \item \g{resources}: \texttt{application.properties}, optional \texttt{schema.sql} and \texttt{data.sql}.
+\end{itemize}
+The entry point is a class annotated with \g{@SpringBootApplication}, whose \texttt{main} calls \texttt{SpringApplication.run}.
+
+Main controller annotations:
+\begin{itemize}
+  \item \g{@RestController} and \g{@RequestMapping}: REST class and base path;
+  \item \g{@GetMapping}, \g{@PostMapping}, \g{@PutMapping}, \g{@DeleteMapping}: map HTTP methods;
+  \item \g{@PathVariable} and \g{@RequestParam}: path variables and query parameters;
+  \item \g{@RequestBody}: JSON body of the request.
+\end{itemize}
+
+\begin{lstlisting}[language=Java]
+@RestController
+@RequestMapping("/api/v1/events")
+@RequiredArgsConstructor
+public class EventController {
+    private final EventService eventService;
+
+    @GetMapping                                 // ?offset=0&limit=10
+    public List<Event> getAll(@RequestParam(defaultValue = "0") int offset,
+                              @RequestParam(defaultValue = "10") int limit) {
+        return eventService.getAllEvents(offset, limit);
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<Event> getById(@PathVariable Long id) {
+        return eventService.getEventById(id);
+    }
+
+    @PostMapping
+    public ResponseEntity<Event> create(@RequestBody Event event) {
+        return eventService.createEvent(event);    // 201 Created
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> delete(@PathVariable Long id) {
+        eventService.deleteEvent(id);
+        return ResponseEntity.noContent().build();  // 204 No Content
+    }
+}
+\end{lstlisting}
+
+With a relational database, \g{Spring Data JPA} generates the CRUD methods from an interface and maps \texttt{@Entity} classes to tables:
+\begin{lstlisting}[language=Java]
+public interface EventRepository extends JpaRepository<Event, Long> { }
+\end{lstlisting}
+A \g{@Service} class uses the repository and implements the rules. Secrets such as API keys must never be hard-coded: read them from environment variables.
+
+\subsection{OpenAPI and Swagger}
+The \g{OpenAPI Specification} describes endpoints, data structures and authentication in a machine-readable format (JSON or YAML). \g{Springdoc OpenAPI} generates it from the annotations of the code, and \g{Swagger UI} shows it as interactive documentation at \url{http://localhost:8080/swagger-ui/index.html}. \g{Postman} is a graphical client to build, save and test requests.
+\begin{lstlisting}
+<dependency>
+  <groupId>org.springdoc</groupId>
+  <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+  <version>2.8.9</version>  <!-- 2.8.x works with Spring Boot 3.5 -->
+</dependency>
+\end{lstlisting}
+
+\begin{remark}
+The final documentation of the project must include the complete REST API documentation with examples of use.
+\end{remark}

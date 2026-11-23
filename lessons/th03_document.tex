@@ -1,0 +1,197 @@
+\section{Document Databases}\label{sec:document}
+
+When the value needs an internal structure that we want to query, the key-value model is no longer enough. In document databases the single piece of information is a structured document, usually the format chosen is \g{xml} or \g{json}. Structured documents provide \g{high flexibility} and the possibility to handle complex data structures. Other important features are that document databases are \g{schema-less} and that they allow complex operations (queries and filtering) and, in some systems, \g{ACID transactions}.
+
+\subsection{Document formats}
+
+\subsubsection{XML documents}
+XML stands for \g{eXtensible Markup Language}, a markup language specifies the structure and the content of a document and includes \g{tags} to provide extra information. With XML we can store any form of information and it is typically used in websites to separate data and format or as a standard for some document types (docx, pptx). Some advantages of XML are:
+\begin{itemize}
+    \item XML is text based (easily transmitted).
+    \item One XML document can be displayed differently in different media.
+    \item XML documents can be modularized.
+\end{itemize}
+
+Its ecosystem includes \g{XML Schema} (structure and types), \g{XSLT} (transformation into other formats), \g{XPath} (navigation) and \g{XQuery} (queries). Some problems and drawbacks of XML are:
+\begin{itemize}
+    \item tags are verbose and repetitious (we need more storage space);
+    \item XML documents are wasteful of space and computationally expensive to parse;
+    \item JSON is better for data interchange.
+\end{itemize}
+
+\subsubsection{JSON documents}
+JSON stands for \g{JavaScript Object Notation} and it is used to format data, a JSON document has been preferred to an XML one for \g{data interchange} on the internet. In JSON an object is an unordered set of \g{name/value} pairs, the pairs are enclosed within braces (\{\}), the name and the value are separated by a colon (:) and pairs are separated by commas. The values can be: another JSON object, string, array (enclosed in brackets [], ordered), number, boolean and null.
+
+We will study JSON-based databases, where documents are stored in \g{collections} and there is no predefined schema. In the slides example the same data takes 416 bytes in XML and 273 in JSON.
+
+\subsubsection{Schema-less vs schema}
+A schema is a specification that describes the structure of an object, such as a table. This specification needs to be defined before executing any code. In document databases we do not need to define any structure and developers can create collections by simply inserting documents. In a schema-less database we have high flexibility in handling the structure of objects, but the DBMS may not be able to enforce rules based on the structure of the data, and it is more difficult to perform integrity checks.
+
+\subsection{Data modelling}
+We will see how to model a document database given some requirements. There is no equivalent of the third normal form that defines a ``correct'' model: \s{the queries to be executed drive the model}.
+
+\subsubsection{Document embedding}
+Using a document database we could simulate a relational database using collections but DON'T DO IT, instead we will use nested documents to represent relationships among entities. Usually we want to reduce the number of collections used. Using nested documents (\g{document embedding}) we can retrieve both entities in a single operation. We need to be careful because we can introduce duplicates across multiple documents, and in complex designs this could lead to inconsistencies in case of changes. Moreover, documents have a maximum size (16\,MB in MongoDB).
+\begin{lstlisting}
+{ "id": 123, "title": "CAMPUS REMEMBER", "category": "Action",
+  "actors": [ { "actor_id": 1, "name": "John Doe" },
+              { "actor_id": 2, "name": "Jane Smith" } ] }
+\end{lstlisting}
+
+\subsubsection{Document linking}
+For the to-many relations we can also use another approach, \g{document linking} (\s{document references} in MongoDB). In this approach we define a collection of entities with, inside, a list of IDs referring to another collection. It is a step back towards the relational model: DO NOT USE IN THE PROJECT except for some specific cases, where it gives the best balance between performance and maintainability.
+\begin{lstlisting}
+// films                                    // actors
+{ "id": 123, "title": "CAMPUS REMEMBER",    { "actor_id": 1, "name": "John Doe" }
+  "actors": [1, 2, 3] }                     { "actor_id": 2, "name": "Jane Smith" }
+\end{lstlisting}
+
+\subsubsection{One-to-many relationship}
+We consider as example the customer entity, which may have associated a list of address entities. A customer has an ID, a name and a string \texttt{person\_or\_business}. In a one-to-many relationship the primary document is the \g{one} (customer) and the \g{many} entities (address) are represented as an array of embedded documents.
+\begin{lstlisting}
+{ "customer_id": 76123, "name": "Acme Data Modeling Services",
+  "person_or_business": "business",
+  "address": [ { "street": "276 North Amber St", "city": "Vancouver",
+                 "state": "WA", "zip": "99076" },
+               { "street": "89 Morton St", "city": "Salem",
+                 "state": "NH", "zip": "01097" } ] }
+\end{lstlisting}
+We have some drawbacks using this approach: we could have consistency problems if the same address belongs to different customers; if a customer has a lot of addresses the dimension increases too much and we need to choose a max dimension; we could have problems with mutable documents or dynamically growing dimensions. We have three alternatives:
+\begin{itemize}
+  \item \g{Linking from the one side}: the customer holds \texttt{address\_ids: [101, 102]}. It is better with limits in document dimension and if we do not need to access the ``too many'' very often together with the primary document.
+  \item \g{Partial embedding}: we embed only what the mock-up shows and keep the full data in another collection. Reads are faster, but redundant data must be updated everywhere.
+\begin{lstlisting}
+{ "_id": 76123, "name": "Acme Data Modeling Services",
+  "address": [ { "address_id": 101, "city": "Vancouver" },
+               { "address_id": 102, "city": "Salem" } ] }
+\end{lstlisting}
+  \item \g{Linking from the many side}: each address holds \texttt{customer\_id}. Retrieving the addresses needs two queries, so it is acceptable only if the documents of the two collections are mostly accessed independently.
+\end{itemize}
+
+\subsubsection{Many-to-many relationship}
+As example we can consider two entities: students and courses. We can use two collections and in both add an array of the IDs of the other one (we need to be careful on integrity, no one checks except us).
+\begin{lstlisting}
+// students
+{ "studentId": "S1001", "name": "Brian Nelson", "gradYear": 2024,
+  "courses": [ "C1667", "C1668" ] }
+// courses
+{ "courseId": "C1667", "title": "Introduction to Data Modeling",
+  "instructor": "Dr. Smith", "credits": 3,
+  "enrolledStudents": [ "S1001", "S1002" ] }
+\end{lstlisting}
+
+Another solution is to implement a partial document embedding: partial because we do not include all the values of the document but just the ones we want. For example in the student collection we can embed the partial document of the course with just ID and title of the course.
+\begin{lstlisting}
+// students
+{ "studentId": "S1001", "name": "Brian Nelson", "gradYear": 2024,
+  "courses": [ { "courseId": "C1667", "title": "Introduction to Data Modeling" },
+               { "courseId": "C1668", "title": "Advanced Database Systems" } ] }
+// courses
+{ "courseId": "C1667", "title": "Introduction to Data Modeling",
+  "instructor": "Dr. Smith", "credits": 3,
+  "enrolledStudents": [ { "studentId": "S1001", "name": "Brian Nelson" },
+                        { "studentId": "S1002", "name": "Emily Davis" } ] }
+\end{lstlisting}
+
+The third approach is to mix embedding and linking: for example first-year courses are read often, so they are embedded with ID and title, while for second-year courses we store only the IDs and do a lookup on the courses collection if needed.
+\begin{lstlisting}
+// students
+{ "studentId": "S1001", "name": "Brian Nelson",
+  "firstYearCourses": [ { "courseId": "C1667",
+                          "title": "Introduction to Data Modeling" } ],
+  "secondYearCourses": [ "C1668", "C1670" ] }
+// courses
+{ "courseId": "C1668", "title": "Advanced Database Systems",
+  "instructor": "Dr. Johnson", "credits": 3,
+  "enrolledStudents": [ "S1001", "S1003" ] }
+\end{lstlisting}
+
+\begin{center}\small
+\begin{tabular}{p{3cm}p{5cm}p{5.5cm}}
+\toprule
+\textbf{Strategy} & \textbf{Use it when} & \textbf{Price} \\
+\midrule
+Embedding & data read together, bounded size & duplicates, document growth \\
+Partial embedding & a mock-up needs few fields of the other entity & updates must be propagated \\
+Linking & unbounded ``many'', independent access & extra queries, no referential integrity \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsubsection{Normalization or denormalization?}
+Normalization avoids anomalies, but needs join operations that hurt performance. Denormalization introduces redundancy and possible anomalies, but reduces collections and joins and, together with indexes, improves reads. This is the typical NoSQL trade-off: \s{read efficiency vs consistency}.
+
+\begin{example}[Time series: truck fleet]
+Each truck sends location, fuel and engine data every three minutes. Embedding all the readings in one truck document grows without bound. We can keep only the main fields in the truck document and link to separate documents for the full data. If a document outgrows its allocated space the DBMS may have to relocate it, which is expensive, so one classical solution is to pre-allocate a day of measurements with null values.
+\end{example}
+
+\subsection{Indexes and workloads}
+An \g{index} stores a small part of the data in an ordered, easy to traverse structure: each indexed value points to the documents containing it, so we avoid a full collection scan. The number of indexes depends on the workload:
+\begin{itemize}
+  \item \g{Read-heavy} applications (analytics, business intelligence): several indexes speed up the queries.
+  \item \g{Write-heavy} applications (the truck example): each index must be updated at each write, so we keep few of them and accept slower reads.
+\end{itemize}
+Indexes are always a trade-off. A common solution is a \g{two-database model}: a store tuned for writes (OLTP) and one tuned for reads (OLAP), aligned periodically by an \g{ETL} (Extract, Transform, Load) process.
+
+\begin{remark}
+In the project the indexes of the document database must be justified and validated experimentally. We should also explain the indexes we decided \s{not} to create.
+\end{remark}
+
+\subsection{Sharding}
+\g{Sharding} is the process of dividing data into blocks, or \g{chunks}. Each block, the \g{shard}, is deployed on a node of the cluster. Sharding is often combined with replication, so each chunk can be replicated on different servers. Sharding allows us to handle heavy loads and to increase the number of system users, it helps distribute data and it is cheaper than vertical scaling.
+
+To implement sharding in a document database we need to select a \g{shard key} and a \g{partition method} (sharding algorithm). A shard key is one or more attributes that exist in all documents of a collection, and it is used to separate the documents (e.g.\ unique ID, name, creation date, category, geographical region).
+
+For the partition algorithm we can have three different approaches:
+\begin{itemize}
+  \item \g{Range}: each shard stores a range of values of the shard key. It works with any attribute whose values can be ordered, for example a date field, where each range is a period of time.
+  \item \g{Hashing}: we use a hash function on the shard key to determine where a document should go. Documents are distributed evenly across the shards, but a range query has to be sent to all the shards. Consistent hashing can also be used.
+  \item \g{List}: given a specific attribute, we define different sub-lists (categories) based on the values of the attribute. For example, if the attribute is \s{country}, we can define a different list for each region (e.g.\ continent).
+\end{itemize}
+
+In the project we will not implement sharding, but the professor likes it if we propose a sharding strategy anyway.
+
+\subsection{Organizing collections}
+
+A \g{collection} is a set of documents stored and managed by a document DBMS. A collection can contain documents with different structures and attributes.
+
+As an example, consider an application that stores events of different types, where all types share some common attributes and each type also has its own specific attributes.
+
+We can see the documents inside a collection from two different points of view. From a logical point of view, documents with different structures represent instances of the same logical entity. From a physical point of view, we can have two different approaches:
+\begin{enumerate}
+  \item \g{Single collection}: all event types are stored in the same collection. Pros: we need just one query to fetch all the events, and the schema is simple. Cons: documents of different types are mixed together, and they may have different access patterns.
+\begin{lstlisting}
+// system_events
+{ "event_type": "click_stream", "datetime": "...", "session_num": "..." }
+{ "event_type": "server_log",   "datetime": "...", "server_IP_addr": "..." }
+\end{lstlisting}
+  \item \g{Multiple collections}: each event type is stored in its own collection. Pros: each collection stores a single document type, with tailored indexes and retention policies, which can be more efficient for specific queries. Cons: queries across different types need to access multiple collections, and therefore multiple queries, and the schema is more complex.
+\begin{lstlisting}
+// click_stream_events
+{ "event_id": "...", "datetime": "...", "session_num": "...", "client_IP_addr": "..." }
+// server_log_events
+{ "event_id": "...", "datetime": "...", "server_IP_addr": "...", "descr": "..." }
+\end{lstlisting}
+\end{enumerate}
+
+The best choice depends on the application workload, access patterns and requirements. We can get insight on the choice by looking at the application code. If it contains a lot of logic that is applied to all documents of a given type, and different document types are processed differently, we will probably choose multiple collections.
+\begin{lstlisting}[language=Python]
+def process_event(event):
+    # common operations for all event types
+    if event["event_type"] == "click_stream":
+        process_click_stream_event(event)
+    elif event["event_type"] == "server_log":
+        process_server_log_event(event)
+\end{lstlisting}
+If the application code is mostly common to all documents and only a small amount of code handles specialised attributes, we will probably choose a single collection.
+\begin{lstlisting}[language=Python]
+def process_book(doc):
+    book = {"title": doc["title"], "author": doc["author"],
+            "year": doc["year"], "descr": doc["descr"]}
+    if doc.get("ebook"):
+        book["descr"] += " (ebook) " + str(doc["ebook_size"])
+\end{lstlisting}
+
+\begin{example}[Follow the queries]
+A store sells products with common fields, plus specific ones for books, CDs and smart appliances. If the main queries are \s{average price per category}, \s{products fitting a package} and \s{products to reorder}, they use only common fields and one collection is enough. If they are \s{devices with the highest power consumption}, \s{books by an author} and \s{CDs by an artist}, three collections can speed them up. However, if product types keep growing, the number of collections becomes unwieldy.
+\end{example}

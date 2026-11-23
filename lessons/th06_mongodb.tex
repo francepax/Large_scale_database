@@ -1,0 +1,324 @@
+\section{MongoDB}\label{sec:mongodb}
+
+MongoDB is the reference implementation of the document model of \cref{sec:document}, and it is the mandatory database family of the project.
+
+
+
+\subsection{Introduction to MongoDB}
+
+\g{MongoDB} (from ``humongous DB'') is a \s{document database}. It is source-available under the \g{Server Side Public License} (SSPL): students, universities and companies can use it freely, also as the internal database of a SaaS application. Only companies that offer MongoDB itself as a managed service must comply with Section 13 of the SSPL or buy a commercial license.
+
+MongoDB aims at high performance and high scalability, and it can be configured in different positions of the CAP triangle, mainly \s{CP} or \s{AP} (see the replica set and the read and write options below).
+
+\subsubsection{Data model}
+
+The data model is the one we saw for document databases:
+\begin{itemize}
+  \item Data is stored as \g{documents}, made of field--value pairs, with a maximum size of 16\,MB. For larger objects (files, videos) MongoDB provides \g{GridFS}, which splits a file into several chunks.
+  \item Each document is stored in a \g{collection}. A collection is the equivalent of a table, but its documents do not need to have the same structure. The documents of a collection share the same set of indexes.
+  \item A database is a set of collections.
+\end{itemize}
+
+\paragraph{JSON and BSON.} \g{JSON} (JavaScript Object Notation) is easy for humans to read and write and easy for computers to parse. A JSON document is an unordered collection of \s{field: value} pairs, with 6 data types (string, number, object, array, boolean, null). Objects can be nested. Fields are not ordered, while array elements are.
+
+MongoDB stores documents in \g{BSON} (Binary JSON), a binary serialization of JSON-like documents. BSON extends JSON with more data types (for example \g{ObjectId}, \g{Date}, 32 and 64 bit integers, \g{Decimal128}, binary data), keeps the fields ordered, and is lightweight, fast to encode and decode and easy to traverse.
+
+\paragraph{Why documents.} Documents correspond to native data types (objects) in many programming languages. Embedded documents and arrays reduce the need for expensive joins, and the dynamic schema supports polymorphism, that is documents of the same collection with different fields.
+
+\subsubsection{The \texttt{\_id} field}
+Every document has an \g{\_id} field, added automatically if missing. It has some special properties:
+\begin{itemize}
+  \item it is the primary key of the collection, so its value is unique and immutable;
+  \item it can be of any type except an array or a regular expression;
+  \item the default type is \g{ObjectId}, a 12-byte value that is small, likely unique, fast to generate and ordered. Since it starts with a timestamp, sorting on an ObjectId is roughly the same as sorting on creation time;
+  \item in a sharded collection, \s{\_id} can be part of the shard key or distinct from it.
+\end{itemize}
+
+\subsubsection{Key features}
+\begin{itemize}
+  \item \g{High performance}: embedded data models reduce I/O on the database, and indexes (also on fields of embedded documents and arrays) make queries faster.
+  \item \g{Rich query language}: CRUD operations, data aggregation, text search and geospatial queries.
+  \item \g{High availability}: the replication facility, called \g{replica set}, provides automatic failover and data redundancy.
+  \item \g{Horizontal scalability}: \g{sharding} distributes the data across a cluster of machines. MongoDB also supports \g{zones} based on the shard key: in a balanced cluster, reads and writes covered by a zone go only to the shards of that zone (for example, data of European users kept on European servers).
+\end{itemize}
+
+\subsubsection{Core processes}
+\begin{itemize}
+  \item \g{mongod}: the main daemon. It handles data requests, manages data access and performs background management operations.
+  \item \g{mongos}: the query router between the client applications and a sharded cluster.
+  \item \g{mongosh}: the official interactive shell (it replaces the legacy \s{mongo} client).
+\end{itemize}
+
+\subsubsection{Replica set and sharded cluster}
+A \g{replica set} is a group of \s{mongod} processes that keep the same data. One node is the \g{primary} and receives all the writes. The primary records every change in its \g{oplog} (operation log), and the \g{secondaries} replicate the oplog and apply the same operations asynchronously. If the primary becomes unreachable, the remaining nodes hold an \g{election} and one secondary becomes the new primary (automatic failover). Nodes can have different \s{priorities}, which tell which node should preferably become primary. By default reads go to the primary; with a different \g{read preference} (\g{nearest}, \g{secondaryPreferred}, \dots) clients can also read from secondaries, accepting possibly stale data.
+
+A \g{sharded cluster} distributes the data \s{at the collection level}: the documents of a collection are split into chunks according to the shard key and spread over the shards. It has three components:
+\begin{itemize}
+  \item the \g{shards}, each holding a subset of the data (in production each shard is a replica set);
+  \item the \g{mongos} routers, which receive the queries from the clients and send them only to the shards that hold the relevant data;
+  \item the \g{config servers}, which store the metadata of the cluster (which chunk lives on which shard).
+\end{itemize}
+The partition methods are the ones we saw for document databases: ranged and hashed sharding.
+
+\subsubsection{MongoDB vs SQL}
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+\textbf{MongoDB} & \textbf{SQL} \\
+\midrule
+Document & Tuple \\
+Collection & Table / View \\
+PK: \texttt{\_id} field & PK: any attribute(s) \\
+Uniformity not required & Uniform relation schema \\
+Index & Index \\
+Embedded structure & Joins \\
+Shard & Partition \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsubsection{Running MongoDB}
+We use the Community Server (stable version 9) together with \s{mongosh}. The default \g{configuration file} is:
+\begin{itemize}
+  \item Linux (package manager): \texttt{/etc/mongod.conf};
+  \item Windows: \texttt{<install dir>/bin/mongod.cfg};
+  \item macOS (Homebrew): \texttt{/usr/local/etc/mongod.conf}, or \texttt{/opt/homebrew/etc/mongod.conf} on Apple Silicon.
+\end{itemize}
+The configuration file sets, among other things, the data and log directories. A standalone \s{mongod} listens on port \g{27017} by default; a different port is set with \texttt{--port}. The data directory is set with \texttt{--dbpath}, for example:
+\begin{lstlisting}
+mongod --dbpath /data/db --port 27017
+\end{lstlisting}
+
+To use authentication: start \s{mongod} without access control, connect with \s{mongosh}, create the user administrator in the \texttt{admin} database, then restart \s{mongod} with \texttt{--auth}.
+\begin{lstlisting}
+use admin
+db.createUser({
+  user: "myUserAdmin",
+  pwd: passwordPrompt(),       // or a cleartext password
+  roles: [ { role: "userAdminAnyDatabase", db: "admin" },
+           { role: "readWriteAnyDatabase", db: "admin" } ]
+})
+\end{lstlisting}
+
+\paragraph{The shell.} \s{mongosh} is an interactive JavaScript interface: we use it to query and update data and for administration.
+\begin{lstlisting}
+mongosh "mongodb://localhost:27017"
+mongosh --port 28017
+mongosh "mongodb://mongodb0.example.com:28015" --username alice --authenticationDatabase admin
+
+show dbs                       // list of databases
+db                             // database currently in use
+use myNewDatabase              // switch database
+db.myCollection.insertOne({ x: 1 })   // creates database and collection
+db.shutdownServer()            // stop the server
+\end{lstlisting}
+Databases and collections do not need to be created explicitly: they are created when we first store data in them.
+
+\g{MongoDB Atlas} is the fully managed cloud service of MongoDB, with built-in replication, sharding, security, vector search and real-time analytics.
+
+\subsection{CRUD operations in the shell}
+All write operations are \g{atomic at the level of a single document}: an update that modifies several fields of one document is all-or-nothing, but an operation on many documents is not atomic as a whole.
+
+\subsubsection{Create}
+\begin{lstlisting}
+db.inventory.insertOne(
+  { item: "canvas", qty: 100, tags: ["cotton"],
+    size: { h: 28, w: 35.5, uom: "cm" } })
+// -> { acknowledged: true, insertedId: ObjectId("...") }
+
+db.inventory.insertMany([
+  { item: "journal",  qty: 25, size: { h: 14,    w: 21,    uom: "cm" }, status: "A" },
+  { item: "notebook", qty: 50, size: { h: 8.5,   w: 11,    uom: "in" }, status: "A" },
+  { item: "paper",    qty: 100, size: { h: 8.5,  w: 11,    uom: "in" }, status: "D" },
+  { item: "planner",  qty: 75, size: { h: 22.85, w: 30,    uom: "cm" }, status: "D" },
+  { item: "postcard", qty: 45, size: { h: 10,    w: 15.25, uom: "cm" }, status: "A" }
+])
+\end{lstlisting}
+
+\subsubsection{Read}
+\g{find(filter, projection)} returns the documents matching the \g{filter}. An empty filter returns all the documents. The filter is a document of \s{field: value} pairs (equality) or \s{field: \{operator: value\}} pairs.
+\begin{lstlisting}
+db.inventory.find()                                  // SELECT * FROM inventory
+db.inventory.find({ status: "D" })                   // WHERE status = "D"
+db.inventory.find({ status: { $in: ["A", "D"] } })   // WHERE status IN ("A","D")
+db.inventory.find({ status: "A", qty: { $lt: 30 } }) // AND (implicit)
+db.inventory.find({ $or: [ { status: "A" }, { qty: { $lt: 30 } } ] })
+db.inventory.find({ status: "A",
+                    $or: [ { qty: { $lt: 30 } }, { item: /^p/ } ] })
+                    // AND (qty < 30 OR item LIKE "p%")
+\end{lstlisting}
+The comparison operators are \g{\$eq}, \g{\$ne}, \g{\$gt}, \g{\$gte}, \g{\$lt}, \g{\$lte}, \g{\$in}, \g{\$nin}. The logical ones are \g{\$and}, \g{\$or}, \g{\$not}, \g{\$nor}.
+
+\paragraph{Embedded documents.} A filter like \texttt{\{ size: \{ h: 14, w: 21, uom: "cm" \} \}} matches the \s{whole} embedded document, with the same fields in the same order. To put a condition on a single nested field we use the \g{dot notation}:
+\begin{lstlisting}
+db.inventory.find({ "size.uom": "in" })
+db.inventory.find({ "size.h": { $lt: 15 }, "size.uom": "in", status: "D" })
+\end{lstlisting}
+
+\paragraph{Arrays.} With \texttt{tags: ["blank", "red"]} and \texttt{dim\_cm: [14, 21]}:
+\begin{lstlisting}
+db.inventory.find({ tags: ["red", "blank"] })          // exactly this array, same order
+db.inventory.find({ tags: { $all: ["red", "blank"] } })  // contains both, any order
+db.inventory.find({ tags: "red" })                     // contains "red"
+db.inventory.find({ dim_cm: { $gt: 25 } })             // at least one element > 25
+db.inventory.find({ dim_cm: { $gt: 15, $lt: 20 } })    // one element > 15 and one < 20
+                                                       // (possibly different elements)
+db.inventory.find({ dim_cm: { $elemMatch: { $gt: 22, $lt: 30 } } })
+                                                       // one element with 22 < x < 30
+db.inventory.find({ "dim_cm.1": { $gt: 25 } })         // second element (zero-based)
+db.inventory.find({ tags: { $size: 3 } })              // arrays with 3 elements
+\end{lstlisting}
+\begin{remark}
+Without \g{\$elemMatch}, the conditions on an array can be satisfied by different elements. With \s{\$elemMatch}, the same element must satisfy all of them.
+\end{remark}
+
+\paragraph{Null and missing fields.} The filter \texttt{\{ item: null \}} matches both the documents where \s{item} is \texttt{null} and those where \s{item} does not exist. To distinguish them we use \texttt{\{ item: \{ \$type: "null" \} \}} (only explicit null) or \texttt{\{ item: \{ \$exists: false \} \}} (only missing).
+
+\paragraph{Projection.} The second argument of \s{find} selects the fields to return: \texttt{1} includes a field, \texttt{0} excludes it. Inclusion and exclusion cannot be mixed, except for \texttt{\_id}, which is always returned unless we set \texttt{\_id: 0}.
+\begin{lstlisting}
+db.inventory.find({ status: "A" }, { item: 1, status: 1, _id: 0 })
+db.inventory.find({ status: "A" }, { status: 0, instock: 0 })
+db.inventory.find({ status: "A" }, { item: 1, "size.uom": 1 })
+db.inventory.find({ status: "A" }, { instock: { $slice: -1 } })   // last element
+db.inventory.find({ status: "A" },
+                  { instock: { $elemMatch: { qty: { $gt: 20 } } } })  // first match
+\end{lstlisting}
+
+We cannot project an array element by index (for example \texttt{"instock.0": 1}). While \s{\$elemMatch} returns only the first matching element, \g{\$filter} returns all of them, using an aggregation expression:
+\begin{lstlisting}
+db.inventory.find({ status: "A" }, { instock: { $filter: {
+    input: "$instock",                    // field of the current document
+    as: "stock",                          // local variable
+    cond: { $gt: ["$$stock.qty", 20] }    // $$ refers to the variable
+} } })
+\end{lstlisting}
+
+\paragraph{Cursors.} \s{find} returns a \g{cursor}, which gives access to the results in \s{batches}, without loading the whole result set in memory. In \s{mongosh} a cursor that is not assigned to a variable is printed automatically, 20 documents at a time. Cursors have methods to sort, skip and limit the results, and \g{countDocuments} counts the matching documents (\texttt{find().count()} is deprecated).
+\begin{lstlisting}
+db.inventory.find().sort({ status: 1, qty: -1 })  // 1 ascending, -1 descending
+db.inventory.find().sort({ qty: -1 }).skip(2).limit(3)
+db.inventory.countDocuments({ status: "A" })
+\end{lstlisting}
+The order in which we chain \s{sort}, \s{skip} and \s{limit} does not matter: the server always sorts first, then skips, then limits.
+
+\subsubsection{Update}
+\g{updateOne(filter, update, options)} modifies the first matching document, \g{updateMany} all of them. The \s{update} document uses \g{update operators}:
+\begin{itemize}
+  \item \g{\$set} sets a field (and creates it if it does not exist), \g{\$unset} removes it, \g{\$rename} renames it;
+  \item \g{\$inc} and \g{\$mul} increment or multiply a number, \g{\$min} and \g{\$max} update only if the new value is smaller or larger;
+  \item \g{\$currentDate} sets a field to the current date;
+  \item on arrays, \g{\$push} adds an element, \g{\$addToSet} adds it only if not present, \g{\$pull} removes the matching elements.
+\end{itemize}
+With the option \g{upsert: true}, a new document is inserted if no document matches the filter. The operator \g{\$setOnInsert} sets fields only in this case.
+\begin{lstlisting}
+db.inventory.updateOne(
+  { item: "paper" },
+  { $set: { "size.uom": "cm", status: "P" },
+    $currentDate: { lastModified: true } })
+
+db.inventory.updateMany({ qty: { $lt: 50 } }, { $inc: { qty: 10 } })
+\end{lstlisting}
+\g{replaceOne(filter, document)} replaces the whole document except \s{\_id}. The new document contains only field--value pairs (no operators) and can have completely different fields.
+
+\subsubsection{Delete}
+\begin{lstlisting}
+db.inventory.deleteOne({ status: "D" })    // at most one document
+db.inventory.deleteMany({ status: "A" })   // all the matching documents
+db.inventory.deleteMany({})                // all the documents, the collection stays
+db.inventory.drop()                        // the collection and its indexes
+\end{lstlisting}
+
+\subsubsection{Import and export}
+The \s{MongoDB Database Tools} are installed separately from the server. \g{mongoimport} loads Extended JSON, CSV or TSV files (UTF-8 only), \g{mongoexport} produces a JSON or CSV export of a collection.
+\begin{lstlisting}
+mongoimport -d test -c restaurants --file restaurants.json
+mongoimport -d test -c athlete --file athlete.csv --type=csv --headerline
+mongoexport -d test -c restaurants --out restaurants.json
+\end{lstlisting}
+These are data exchange tools: they do not preserve indexes, validation rules, users or sharding. For a full backup we use \g{mongodump} (binary snapshot) and \g{mongorestore}.
+
+\subsection{Aggregation pipeline}
+\g{Aggregation} operations process the documents of a collection and return computed results. A \s{find} can select documents and fields and sort them; an aggregation can do all of this and also rename and compute fields, group values and summarize data.
+
+In the \g{aggregation pipeline} the documents go through a sequence of \g{stages}, and each stage transforms the documents it receives and passes its output to the next one. A stage does not need to produce one output document per input document: \s{\$match} can drop documents, \s{\$group} can merge many documents into one.
+
+\begin{example}[Total amount per customer]
+\begin{lstlisting}
+db.orders.insertMany([
+  { cust_id: "A123", amount: 500, status: "A" },
+  { cust_id: "A123", amount: 250, status: "A" },
+  { cust_id: "B212", amount: 200, status: "A" },
+  { cust_id: "A123", amount: 300, status: "D" } ])
+
+db.orders.aggregate([
+  { $match: { status: "A" } },
+  { $group: { _id: "$cust_id", total: { $sum: "$amount" } } } ])
+// -> { _id: "A123", total: 750 }, { _id: "B212", total: 200 }
+\end{lstlisting}
+Inside a stage, \texttt{"\$field"} means ``the value of \s{field} in the current document''.
+\end{example}
+
+The main stages:
+\begin{itemize}
+  \item \g{\$match}: filters the documents, with the same syntax as the \s{find} filter.
+  \item \g{\$group}: groups the documents by the \s{\_id} expression and returns one document per group. The other fields are \g{accumulators}: \g{\$sum}, \g{\$avg}, \g{\$min}, \g{\$max}, \g{\$push}, \g{\$addToSet}, \dots. To count the documents of a group we use \texttt{\{ \$sum: 1 \}}; to group on several fields the \s{\_id} is a document, for example \texttt{\_id: \{ city: "\$city", state: "\$state" \}}; with \texttt{\_id: null} the whole input is a single group.
+  \item \g{\$project}: includes, excludes or computes fields.
+  \item \g{\$sort}, \g{\$skip}, \g{\$limit}: as for cursors, but here the order of the stages matters (sort, then skip, then limit).
+  \item \g{\$unwind}: deconstructs an array field and outputs one document per element. Each output document is equal to the input one, except that the array field holds a single element.
+  \item \g{\$out} and \g{\$merge}: write the result into a collection. They must be the last stage.
+\end{itemize}
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+\textbf{SQL} & \textbf{Aggregation} & \textbf{Meaning} \\
+\midrule
+\texttt{WHERE} & \texttt{\$match} & filter documents \\
+\texttt{GROUP BY} & \texttt{\$group} & group documents, then apply accumulators \\
+\texttt{HAVING} & \texttt{\$match} (after \texttt{\$group}) & filter groups \\
+\texttt{SELECT} & \texttt{\$project} & reshape documents \\
+\texttt{ORDER BY} & \texttt{\$sort} & sort \\
+\texttt{LIMIT} & \texttt{\$limit} & limit the output \\
+\texttt{SUM()} & \texttt{\$sum} & sum of each group \\
+\texttt{COUNT()} & \texttt{\$sum: 1} & count of each group \\
+--- & \texttt{\$unwind} & one document per array element \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{remark}
+There is also \g{\$lookup}, which performs a left outer join between two collections. In this course it must \s{not} be used, because it is not a good practice: the data model should be designed (embedding or duplicating data) so that joins are not needed.
+\end{remark}
+
+\begin{example}[Zips dataset]
+Each document of the \s{zips} collection has the form \texttt{\{ \_id: "10280", city: "NEW YORK", state: "NY", pop: 5574, loc: [-74.01, 40.71] \}}.
+\begin{lstlisting}
+// States with a population of at least 10 million
+db.zips.aggregate([
+  { $group: { _id: "$state", totalPop: { $sum: "$pop" } } },
+  { $match: { totalPop: { $gte: 10000000 } } } ])
+
+// Average city population per state
+db.zips.aggregate([
+  { $group: { _id: { state: "$state", city: "$city" }, pop: { $sum: "$pop" } } },
+  { $group: { _id: "$_id.state", avgCityPop: { $avg: "$pop" } } } ])
+\end{lstlisting}
+In the second pipeline the first \s{\$group} computes the population of each city (a city has many zip codes), the second averages these values by state.
+
+The largest and smallest city of each state need four stages: population per city, sort, \g{\$first} and \g{\$last} per state, and a final reshape.
+\begin{lstlisting}
+db.zips.aggregate([
+  { $group: { _id: { state: "$state", city: "$city" }, pop: { $sum: "$pop" } } },
+  { $sort: { pop: 1 } },
+  { $group: { _id: "$_id.state",
+      biggestCity:  { $last: "$_id.city" },  biggestPop:  { $last: "$pop" },
+      smallestCity: { $first: "$_id.city" }, smallestPop: { $first: "$pop" } } },
+  { $project: { _id: 0, state: "$_id",
+      biggestCity:  { name: "$biggestCity",  pop: "$biggestPop" },
+      smallestCity: { name: "$smallestCity", pop: "$smallestPop" } } } ])
+\end{lstlisting}
+\end{example}
+
+\begin{remark}
+The stages can appear several times in a pipeline, except \s{\$out}, \s{\$merge} and \s{\$geoNear}. In the project each pipeline must answer a real analytic requirement, and the fields it needs must already be in the collection, since \s{\$lookup} is forbidden.
+\end{remark}
